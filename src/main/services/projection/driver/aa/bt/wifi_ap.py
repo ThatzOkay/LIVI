@@ -230,6 +230,29 @@ def _is_dhcp_listening() -> bool:
     return False
 
 
+def deauth_all_clients() -> int:
+    """Force every associated station off the AP. Returns the number of
+    stations deauthenticated (0 if hostapd isn't running)."""
+    try:
+        out = subprocess.run(
+            ["sudo", "hostapd_cli", "-p", "/var/run/hostapd", "-i", WIFI_IFACE, "list_sta"],
+            capture_output=True, text=True, timeout=3,
+        )
+    except (FileNotFoundError, subprocess.TimeoutExpired):
+        return 0
+    macs = [m.strip() for m in (out.stdout or "").splitlines() if m.strip()]
+    for mac in macs:
+        try:
+            subprocess.run(
+                ["sudo", "hostapd_cli", "-p", "/var/run/hostapd", "-i", WIFI_IFACE,
+                 "deauthenticate", mac],
+                capture_output=True, text=True, timeout=3,
+            )
+        except Exception:
+            pass
+    return len(macs)
+
+
 def _hostapd_state() -> str:
     """Query hostapd's actual state via ctrl-interface. Returns the `state=`
     value (DISABLED / COUNTRY_UPDATE / HT_SCAN / ENABLED / …) or "" on error."""

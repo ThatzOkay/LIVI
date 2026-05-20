@@ -110,6 +110,11 @@ export class AaBtSockClient {
     )) as ActionResponse
   }
 
+  /** Kick every associated Wi-Fi station off the AP. */
+  async deauthApClients(timeoutMs = 5000): Promise<ActionResponse> {
+    return (await this.request('deauth-ap', timeoutMs)) as ActionResponse
+  }
+
   /** Open a event subscription. */
   subscribe(
     onEvent: (ev: { event: string; mac?: string; path?: string }) => void,

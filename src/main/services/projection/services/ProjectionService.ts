@@ -1027,6 +1027,11 @@ export class ProjectionService {
         const desired = this.arbiter.getOverride()
         if (!desired) break
 
+        const wasWireless =
+          this.started &&
+          this.drivers.getAa() !== null &&
+          this.drivers.getAa()?.isWiredMode() === false
+
         if (this.started) {
           try {
             await this.stop()
@@ -1035,19 +1040,16 @@ export class ProjectionService {
           }
         }
 
+        if (wasWireless) {
+          // Leaving wireless: kick the phone off the AP
+          await this.aaBtSock.deauthApClients().catch(() => {})
+        }
+
         if (desired.transport === 'aa' && desired.mode === 'wireless') {
-          // Wired session is stopped at this point. If the phone is already
-          // BT-connected, bounce to retrigger AA RFCOMM. Otherwise wake it
-          // over BT so the wireless handshake can run.
-          const anyConnected = await this.aaBtSock
-            .listPaired()
-            .then((devs) => devs.some((d) => d.connected))
-            .catch(() => false)
-          if (anyConnected) {
-            await this.bounceAaBtConnections()
-          } else {
-            await this.tryAutoConnect()
-          }
+          await this.bounceAaBtConnections()
+          // Give BlueZ a moment to commit the disconnect before we re-wake.
+          await new Promise((r) => setTimeout(r, 500))
+          await this.tryAutoConnect()
         }
 
         await this.autoStartIfNeeded()

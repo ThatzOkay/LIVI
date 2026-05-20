@@ -163,7 +163,10 @@ export class TransportArbiter {
     const list: Candidate[] = []
     if (this.dongleConnected) list.push(DONGLE)
     if (this.phoneConnected) list.push(AA_WIRED)
-    if (this.deps.isWirelessEnabled() && this.deps.isWirelessPhoneInRange()) list.push(AA_WIRELESS)
+    const offerWireless =
+      this.deps.isWirelessEnabled() &&
+      (this.deps.isWirelessPhoneInRange() || this.deps.isWiredAaSessionActive())
+    if (offerWireless) list.push(AA_WIRELESS)
     return list
   }
 
@@ -271,7 +274,10 @@ export class TransportArbiter {
       dongleDetected: this.dongleConnected,
       wiredPhoneDetected: this.phoneConnected,
       wirelessPhoneDetected:
-        this.deps.isWirelessEnabled() && (this.deps.isWirelessPhoneInRange() || wirelessActiveNow),
+        this.deps.isWirelessEnabled() &&
+        (this.deps.isWirelessPhoneInRange() ||
+          wirelessActiveNow ||
+          this.deps.isWiredAaSessionActive()),
       wiredPhoneActive: isPhoneActive && wired,
       wirelessPhoneActive: wirelessActiveNow,
       preference: this.deps.getPreference()

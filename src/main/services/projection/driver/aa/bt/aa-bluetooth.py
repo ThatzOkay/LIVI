@@ -29,7 +29,7 @@ import dbus.service
 import dbus.mainloop.glib
 from gi.repository import GLib
 
-from wifi_ap import setup_ap, teardown_ap, get_wlan_mac, AP_IP
+from wifi_ap import setup_ap, teardown_ap, get_wlan_mac, deauth_all_clients, AP_IP
 from config import SSID, PASSPHRASE, CHANNEL, PORT as AA_PORT, BTNAME, WIFI_IFACE, BT_ADAPTER
 
 # ── Debug gate ────────────────────────────────────────────────────────────────
@@ -1009,6 +1009,7 @@ def _start_event_server() -> None:
       disconnect <mac>  → {"ok": true} or {"ok": false, "error": "..."}
       remove <mac>            → {"ok": true} or {"ok": false, "error": "..."}
       session-active <bool>   → {"ok": true, "active": true|false}
+      deauth-ap               → {"ok": true, "count": N}  (kicks Wi-Fi clients)
     """
     try:
         os.unlink(_AA_EVENT_SOCK)
@@ -1057,6 +1058,10 @@ def _start_event_server() -> None:
                     new_value = _session_active
                 dprint(f"[aa-bt] session active: {new_value}", flush=True)
                 return {"ok": True, "active": new_value}
+            if cmd == "deauth-ap":
+                count = deauth_all_clients()
+                dprint(f"[aa-bt] deauth-ap: kicked {count} client(s)", flush=True)
+                return {"ok": True, "count": count}
             return {"ok": False, "error": f"unknown command: {cmd!r}"}
         except Exception as e:
             traceback.print_exc()
