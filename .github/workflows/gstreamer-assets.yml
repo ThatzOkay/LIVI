@@ -136,9 +136,21 @@ jobs:
         shell: bash
         run: |
           set -euo pipefail
+          # GStreamer uses GNOME-style versioning: even minor = stable, odd = dev.
+          GST_VERSION=$(curl -fsSL https://gstreamer.freedesktop.org/data/pkg/osx/ \
+            | grep -oE 'href="[0-9]+\.[0-9]+\.[0-9]+/"' \
+            | grep -oE '[0-9]+\.[0-9]+\.[0-9]+' \
+            | awk -F. '$2 % 2 == 0' \
+            | sort -V \
+            | tail -1)
+          if [[ -z "$GST_VERSION" ]]; then
+            echo "Failed to resolve latest stable GStreamer version from osx listing"
+            exit 1
+          fi
+          echo "Resolved macOS GStreamer: $GST_VERSION"
           curl -fL \
             -o gstreamer-runtime.pkg \
-            https://gstreamer.freedesktop.org/data/pkg/osx/1.28.2/gstreamer-1.0-1.28.2-universal.pkg
+            "https://gstreamer.freedesktop.org/data/pkg/osx/${GST_VERSION}/gstreamer-1.0-${GST_VERSION}-universal.pkg"
 
       - name: Install GStreamer runtime pkg [macos-arm64]
         if: matrix.os == 'macos' && matrix.arch == 'arm64'
@@ -343,7 +355,21 @@ jobs:
         shell: pwsh
         run: |
           $ErrorActionPreference = 'Stop'
-          curl.exe -L 'https://gstreamer.freedesktop.org/data/pkg/windows/1.28.2/msvc/gstreamer-1.0-msvc-x86_64-1.28.2.exe' -o 'gstreamer-runtime-x86_64.exe'
+
+          # GStreamer uses GNOME-style versioning: even minor = stable, odd = dev.
+          $listing = (Invoke-WebRequest -Uri 'https://gstreamer.freedesktop.org/data/pkg/windows/' -UseBasicParsing).Content
+          $versions = [regex]::Matches($listing, 'href="([0-9]+\.[0-9]+\.[0-9]+)/"') |
+            ForEach-Object { [Version]$_.Groups[1].Value } |
+            Where-Object { $_.Minor % 2 -eq 0 } |
+            Sort-Object
+          if (-not $versions -or $versions.Count -eq 0) {
+            throw 'Failed to resolve latest stable GStreamer version from windows listing'
+          }
+          $gstVersion = $versions[-1].ToString()
+          Write-Host "Resolved Windows GStreamer: $gstVersion"
+
+          $url = "https://gstreamer.freedesktop.org/data/pkg/windows/$gstVersion/msvc/gstreamer-1.0-msvc-x86_64-$gstVersion.exe"
+          curl.exe -L $url -o 'gstreamer-runtime-x86_64.exe'
 
       - name: Install GStreamer runtime [windows-x64]
         if: matrix.os == 'windows' && matrix.arch == 'x64'
@@ -537,7 +563,7 @@ jobs:
 
           git add -f -A assets/gstreamer
 
-          if [[ -z "$(git status --porcelain)" ]]; then
+          if git diff --cached --quiet; then
             echo "No asset changes to commit"
             echo "changed=false" >> "$GITHUB_OUTPUT"
             exit 0
