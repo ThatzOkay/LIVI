@@ -1093,7 +1093,7 @@ export class ProjectionService {
           await this.bounceAaBtConnections()
           // Give BlueZ a moment to commit the disconnect before we re-wake.
           await new Promise((r) => setTimeout(r, 500))
-          await this.tryAutoConnect()
+          await this.tryAutoConnect({ force: true })
         }
 
         await this.autoStartIfNeeded()
@@ -1317,15 +1317,15 @@ export class ProjectionService {
   }
 
   // Pick a target from the paired list and fire a single Connect
-  private async tryAutoConnect(): Promise<void> {
+  private async tryAutoConnect(opts: { force?: boolean } = {}): Promise<void> {
     if (!this.aaBtSupervisor) return
     // Don't poke the phone over BT while a wired session is already running
     if (this.started && this.drivers.getAa()?.isWiredMode() === true) {
       console.log('[ProjectionService] autoconnect: skipped (wired AA session active)')
       return
     }
-    // Same when a wired phone is plugged but the AA session hasn't started yet
-    if (this.arbiter.getSnapshot().wiredPhoneDetected) {
+    // Passive autostart: skip if wired phone present. Manual switch sets force.
+    if (!opts.force && this.arbiter.getSnapshot().wiredPhoneDetected) {
       console.log('[ProjectionService] autoconnect: skipped (wired phone detected)')
       return
     }

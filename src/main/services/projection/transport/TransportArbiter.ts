@@ -202,6 +202,9 @@ export class TransportArbiter {
       return findByT('dongle') ?? findByT('aa') ?? detected[0]
     }
     if (pref === 'native') {
+      // Sticky to the current session if still detected
+      const current = this.currentCandidate()
+      if (current && detected.some((c) => candidateEquals(c, current))) return current
       return findByT('aa') ?? findByT('cp') ?? detected[0]
     }
 
