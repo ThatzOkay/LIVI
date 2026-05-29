@@ -120,6 +120,7 @@ Make sure the following packages and tools are installed on your system before b
 - **build-essential** (Linux: includes `gcc`, `g++`, `make`, etc.)
 - **libusb-1.0-0-dev** (required for `node-usb`)
 - **libudev-dev** (optional but recommended for USB detection on Linux)
+- **libgstreamer1.0-dev** + **libgstreamer-plugins-base1.0-dev** (required to build the `gst-video` addon)
 - **fuse** (required to run AppImages)
 
 On Debian/Ubuntu/Raspberry Pi OS, install everything with:
@@ -127,11 +128,31 @@ On Debian/Ubuntu/Raspberry Pi OS, install everything with:
 ```bash
 sudo apt-get update
 sudo apt-get install -y git build-essential python3 python3-dev \
-  libusb-1.0-0-dev libudev-dev
+  libusb-1.0-0-dev libudev-dev \
+  libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
 curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash -
 sudo apt-get install -y nodejs
 sudo corepack enable
 ```
+
+On Fedora, install everything with:
+
+```bash
+sudo dnf install -y git gcc gcc-c++ make python3 python3-devel \
+  pkgconf-pkg-config libusb1-devel systemd-devel \
+  gstreamer1-devel gstreamer1-plugins-base-devel \
+  fuse fuse-libs
+curl -fsSL https://rpm.nodesource.com/setup_24.x | sudo bash -
+sudo dnf install -y nodejs
+sudo corepack enable
+```
+
+
+On macOS, the `gst-video` addon links against the **GStreamer.framework**. Install
+both the runtime and development packages (matching versions) from
+[gstreamer.freedesktop.org](https://gstreamer.freedesktop.org/download/#macos)
+before building. `node-gyp` discovers it via `pkg-config` under
+`/Library/Frameworks/GStreamer.framework`.
 
 ### Clone & Build
 
