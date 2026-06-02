@@ -105,8 +105,12 @@ struct tinywl_server {
 	double crop_l, crop_t, vis_w, vis_h, tier_w, tier_h;
 	int ctrl_fd;
 
-	// LIVI: magenta backdrop (LIVI_DEBUG_BG)
-	struct wlr_scene_rect *debug_bg;
+	// LIVI: opaque backdrop at the very bottom, so nothing behind the compositor shows
+	// through the transparent UI before the video plane exists. Colour follows the LIVI
+	// theme background, pushed over the control socket (black until set).
+	struct wlr_scene_rect *backdrop;
+	float backdrop_color[4];
+	bool has_backdrop_color;
 };
 
 struct tinywl_output {
@@ -600,8 +604,8 @@ static void output_request_state(struct wl_listener *listener, void *data) {
 		wlr_xdg_toplevel_set_size(ui->xdg_toplevel,
 			output->server->output_width, output->server->output_height);
 	}
-	if (output->server->debug_bg) {
-		wlr_scene_rect_set_size(output->server->debug_bg,
+	if (output->server->backdrop) {
+		wlr_scene_rect_set_size(output->server->backdrop,
 			output->server->output_width, output->server->output_height);
 	}
 }
@@ -678,11 +682,14 @@ static void server_new_output(struct wl_listener *listener, void *data) {
 	struct wlr_scene_output *scene_output = wlr_scene_output_create(server->scene, wlr_output);
 	wlr_scene_output_layout_add_output(server->scene_layout, l_output, scene_output);
 
-	if (getenv("LIVI_DEBUG_BG") && server->debug_bg == NULL) {
+	if (server->backdrop == NULL) {
+		float black[4] = {0.0f, 0.0f, 0.0f, 1.0f};
 		float magenta[4] = {0.55f, 0.0f, 0.55f, 1.0f};
-		server->debug_bg = wlr_scene_rect_create(&server->scene->tree,
-			server->output_width, server->output_height, magenta);
-		wlr_scene_node_lower_to_bottom(&server->debug_bg->node);
+		const float *color = getenv("LIVI_DEBUG_BG") ? magenta
+			: server->has_backdrop_color ? server->backdrop_color : black;
+		server->backdrop = wlr_scene_rect_create(&server->scene->tree,
+			server->output_width, server->output_height, color);
+		wlr_scene_node_lower_to_bottom(&server->backdrop->node);
 	}
 }
 
@@ -695,8 +702,8 @@ static void xdg_toplevel_map(struct wl_listener *listener, void *data) {
 		/* LIVI: keep the video plane at the bottom, never focus it; size+position it
 		 * to the AA content region (or fill the output if none set yet) */
 		wlr_scene_node_lower_to_bottom(&toplevel->scene_tree->node);
-		if (toplevel->server->debug_bg) {
-			wlr_scene_node_lower_to_bottom(&toplevel->server->debug_bg->node);
+		if (toplevel->server->backdrop) {
+			wlr_scene_node_lower_to_bottom(&toplevel->server->backdrop->node);
 		}
 		apply_video_layout(toplevel->server);
 		return;
@@ -896,6 +903,18 @@ static void ctrl_handle_line(struct tinywl_server *server, const char *line) {
 		server->tier_w = tw;
 		server->tier_h = th;
 		apply_video_layout(server);
+		return;
+	}
+	int r, g, b;
+	if (sscanf(line, "backdrop %d %d %d", &r, &g, &b) == 3) {
+		server->backdrop_color[0] = (float)r / 255.0f;
+		server->backdrop_color[1] = (float)g / 255.0f;
+		server->backdrop_color[2] = (float)b / 255.0f;
+		server->backdrop_color[3] = 1.0f;
+		server->has_backdrop_color = true;
+		if (server->backdrop && !getenv("LIVI_DEBUG_BG")) {
+			wlr_scene_rect_set_color(server->backdrop, server->backdrop_color);
+		}
 	}
 }
 

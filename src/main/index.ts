@@ -7,6 +7,7 @@ import { setupLifecycle } from '@main/app/lifecycle'
 installMainProcessErrorHandlers()
 
 import { registerIpc } from '@main/ipc'
+import { configEvents } from '@main/ipc/utils'
 import { registerAppProtocol } from '@main/protocol/appProtocol'
 import { checkAndInstallAaSudoers } from '@main/services/projection/driver/aa/aaSudoers'
 import { ProjectionService } from '@main/services/projection/services/ProjectionService'
@@ -14,10 +15,12 @@ import { TelemetrySocket } from '@main/services/Socket'
 import { setupTelemetry } from '@main/services/telemetry/setupTelemetry'
 import { TelemetryStore } from '@main/services/telemetry/TelemetryStore'
 import { runtimeStateProps } from '@main/types'
+import type { Config } from '@shared/types'
 import { app } from 'electron'
 import { loadConfig } from './config/loadConfig'
 import { USBService } from './services/usb/USBService'
 import { checkAndInstallUdevRule } from './services/usb/udevRule'
+import { setCompositorBackdrop } from './services/video/GstVideo'
 import { createMainWindow, getMainWindow } from './window/createWindow'
 import { setupSecondaryWindows } from './window/secondaryWindows'
 
@@ -52,6 +55,10 @@ app.whenReady().then(async () => {
   registerIpc(runtimeState, services)
   createMainWindow(runtimeState, services)
   setupSecondaryWindows(runtimeState)
+
+  // Linux compositor: theme its backdrop now and on every darkMode change
+  setCompositorBackdrop(runtimeState.config.darkMode)
+  configEvents.on('changed', (next: Config) => setCompositorBackdrop(next.darkMode))
   setupTelemetry({
     store: telemetryStore,
     projectionService,

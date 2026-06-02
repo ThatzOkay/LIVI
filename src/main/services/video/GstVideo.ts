@@ -34,6 +34,15 @@ class CompositorControl {
     this.flush()
   }
 
+  // Theme background for the compositor backdrop
+  // Kept in sync with themeColors.ts: dark / light
+  setBackdrop(darkMode: boolean): void {
+    if (!this.enabled) return
+    const [r, g, b] = darkMode ? [0, 0, 0] : [0xd4, 0xd4, 0xd4]
+    this.pending.set('__backdrop__', `backdrop ${r} ${g} ${b}\n`)
+    this.flush()
+  }
+
   private flush(): void {
     const s = this.socket
     if (s && !s.destroyed && s.writable) {
@@ -63,6 +72,11 @@ class CompositorControl {
 }
 
 const compositorControl = new CompositorControl()
+
+// Push the theme background colour to the compositor backdrop (Linux/compositor only)
+export function setCompositorBackdrop(darkMode: boolean): void {
+  compositorControl.setBackdrop(darkMode)
+}
 
 export type GstCodecSupport = { hw: boolean; sw: boolean }
 export type GstCodecProbe = Record<GstVideoCodec, GstCodecSupport>
