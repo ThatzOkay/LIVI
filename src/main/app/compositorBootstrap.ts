@@ -21,7 +21,16 @@ export function bootstrapCompositor(): boolean {
   const inner =
     `LIVI_COMPOSITOR=1 LD_LIBRARY_PATH='${hostLd}' ` + `'${appImage}' --ozone-platform=wayland`
 
-  const env: NodeJS.ProcessEnv = { ...process.env, LIVI_UI_APP_ID: 'livi' }
+  // Control socket the host uses to push the AA video content region to the
+  // compositor (which crops the video plane zero-copy)
+  const runtimeDir = process.env.XDG_RUNTIME_DIR || '/tmp'
+  const ctrlSocket = join(runtimeDir, 'livi-compositor.ctrl')
+
+  const env: NodeJS.ProcessEnv = {
+    ...process.env,
+    LIVI_UI_APP_ID: 'livi',
+    LIVI_COMPOSITOR_CTRL: ctrlSocket
+  }
   delete env.APPIMAGE
   delete env.APPDIR
   delete env.ARGV0

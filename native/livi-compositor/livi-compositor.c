@@ -9,12 +9,17 @@
  * composites zero-copy. The UI (Electron, transparent) blends over it.
  */
 #include <assert.h>
+#include <errno.h>
+#include <fcntl.h>
 #include <getopt.h>
+#include <math.h>
 #include <signal.h>
 #include <stdbool.h>
 #include <stdlib.h>
 #include <stdio.h>
 #include <string.h>
+#include <sys/socket.h>
+#include <sys/un.h>
 #include <time.h>
 #include <unistd.h>
 #include <wayland-server-core.h>
@@ -92,6 +97,13 @@ struct tinywl_server {
 	struct tinywl_toplevel *video_toplevel;
 	struct tinywl_toplevel *ui_toplevel;
 	int32_t output_width, output_height;
+
+	// LIVI: AA content region for the video plane, pushed over the control socket
+	// (LIVI_COMPOSITOR_CTRL). Crops the phone's letter/pillarbox margins out of the
+	// 16:9 transport tier so the user-chosen content fills the output, zero-copy.
+	bool has_crop;
+	double crop_l, crop_t, vis_w, vis_h, tier_w, tier_h;
+	int ctrl_fd;
 
 	// LIVI: magenta backdrop (LIVI_DEBUG_BG)
 	struct wlr_scene_rect *debug_bg;
@@ -538,19 +550,51 @@ static void output_frame(struct wl_listener *listener, void *data) {
 	wlr_scene_output_send_frame_done(scene_output, &now);
 }
 
+/* LIVI: size and position the video plane to the AA content region so the user-chosen
+ * content fills the output and the phone's letter/pillarbox margins overflow off the
+ * output edge (which the scene clips) */
+static void apply_video_layout(struct tinywl_server *server) {
+	struct tinywl_toplevel *video = server->video_toplevel;
+	if (video == NULL || !video->xdg_toplevel->base->initialized) {
+		return;
+	}
+	int ow = server->output_width, oh = server->output_height;
+	if (ow <= 0 || oh <= 0) {
+		return;
+	}
+	if (!server->has_crop || server->vis_w <= 0 || server->vis_h <= 0 ||
+			server->tier_w <= 0 || server->tier_h <= 0) {
+		wlr_xdg_toplevel_set_size(video->xdg_toplevel, ow, oh);
+		wlr_scene_node_set_position(&video->scene_tree->node, 0, 0);
+		return;
+	}
+	/* contain the content into the output (uniform scale; bars only on AR mismatch) */
+	double sx = (double)ow / server->vis_w;
+	double sy = (double)oh / server->vis_h;
+	double scale = sx < sy ? sx : sy;
+	double off_x = (ow - server->vis_w * scale) / 2.0;
+	double off_y = (oh - server->vis_h * scale) / 2.0;
+	int tw = (int)lround(server->tier_w * scale);
+	int th = (int)lround(server->tier_h * scale);
+	int px = (int)lround(off_x - server->crop_l * scale);
+	int py = (int)lround(off_y - server->crop_t * scale);
+	wlr_xdg_toplevel_set_size(video->xdg_toplevel, tw, th);
+	wlr_scene_node_set_position(&video->scene_tree->node, px, py);
+	wlr_log(WLR_INFO,
+		"livi: video crop content=%gx%g tier=%gx%g crop=%g,%g output=%dx%d -> size %dx%d pos %d,%d",
+		server->vis_w, server->vis_h, server->tier_w, server->tier_h,
+		server->crop_l, server->crop_t, ow, oh, tw, th, px, py);
+}
+
 static void output_request_state(struct wl_listener *listener, void *data) {
 	struct tinywl_output *output = wl_container_of(listener, output, request_state);
 	const struct wlr_output_event_request_state *event = data;
 	wlr_output_commit_state(output->wlr_output, event->state);
 
-	/* LIVI: track the output size and keep the video plane filling it */
+	/* LIVI: track the output size and reflow the video plane (crop-aware) + UI */
 	output->server->output_width = output->wlr_output->width;
 	output->server->output_height = output->wlr_output->height;
-	struct tinywl_toplevel *video = output->server->video_toplevel;
-	if (video != NULL && video->xdg_toplevel->base->initialized) {
-		wlr_xdg_toplevel_set_size(video->xdg_toplevel,
-			output->server->output_width, output->server->output_height);
-	}
+	apply_video_layout(output->server);
 	struct tinywl_toplevel *ui = output->server->ui_toplevel;
 	if (ui != NULL && ui->xdg_toplevel->base->initialized) {
 		wlr_xdg_toplevel_set_size(ui->xdg_toplevel,
@@ -648,12 +692,13 @@ static void xdg_toplevel_map(struct wl_listener *listener, void *data) {
 	wl_list_insert(&toplevel->server->toplevels, &toplevel->link);
 
 	if (toplevel->is_video) {
-		/* LIVI: pin the video plane to the bottom-left, never focus it */
-		wlr_scene_node_set_position(&toplevel->scene_tree->node, 0, 0);
+		/* LIVI: keep the video plane at the bottom, never focus it; size+position it
+		 * to the AA content region (or fill the output if none set yet) */
 		wlr_scene_node_lower_to_bottom(&toplevel->scene_tree->node);
 		if (toplevel->server->debug_bg) {
 			wlr_scene_node_lower_to_bottom(&toplevel->server->debug_bg->node);
 		}
+		apply_video_layout(toplevel->server);
 		return;
 	}
 
@@ -827,6 +872,110 @@ static void server_new_xdg_popup(struct wl_listener *listener, void *data) {
 	wl_signal_add(&xdg_popup->events.destroy, &popup->destroy);
 }
 
+/* LIVI control socket (LIVI_COMPOSITOR_CTRL): a tiny line protocol the Electron main
+ * process uses to push the AA video content region. One command for now:
+ *   videocrop <role> <cropL> <cropT> <visW> <visH> <tierW> <tierH>\n
+ * `role` is reserved for multi-output routing */
+struct livi_ctrl_client {
+	struct tinywl_server *server;
+	struct wl_event_source *source;
+	char buf[512];
+	size_t len;
+};
+
+static void ctrl_handle_line(struct tinywl_server *server, const char *line) {
+	char role[32];
+	double cl, ct, vw, vh, tw, th;
+	if (sscanf(line, "videocrop %31s %lf %lf %lf %lf %lf %lf",
+			role, &cl, &ct, &vw, &vh, &tw, &th) == 7) {
+		server->has_crop = vw > 0 && vh > 0;
+		server->crop_l = cl;
+		server->crop_t = ct;
+		server->vis_w = vw;
+		server->vis_h = vh;
+		server->tier_w = tw;
+		server->tier_h = th;
+		apply_video_layout(server);
+	}
+}
+
+static int ctrl_client_readable(int fd, uint32_t mask, void *data) {
+	struct livi_ctrl_client *c = data;
+	if (mask & (WL_EVENT_HANGUP | WL_EVENT_ERROR)) {
+		goto close_client;
+	}
+	ssize_t n = read(fd, c->buf + c->len, sizeof(c->buf) - c->len - 1);
+	if (n <= 0) {
+		goto close_client;
+	}
+	c->len += (size_t)n;
+	c->buf[c->len] = '\0';
+	char *start = c->buf, *nl;
+	while ((nl = strchr(start, '\n')) != NULL) {
+		*nl = '\0';
+		ctrl_handle_line(c->server, start);
+		start = nl + 1;
+	}
+	size_t rem = c->len - (size_t)(start - c->buf);
+	memmove(c->buf, start, rem);
+	c->len = rem;
+	return 0;
+
+close_client:
+	wl_event_source_remove(c->source);
+	close(fd);
+	free(c);
+	return 0;
+}
+
+static int ctrl_accept(int fd, uint32_t mask, void *data) {
+	(void)mask;
+	struct tinywl_server *server = data;
+	int client = accept(fd, NULL, NULL);
+	if (client < 0) {
+		return 0;
+	}
+	struct livi_ctrl_client *c = calloc(1, sizeof(*c));
+	c->server = server;
+	struct wl_event_loop *loop = wl_display_get_event_loop(server->wl_display);
+	c->source = wl_event_loop_add_fd(loop, client, WL_EVENT_READABLE,
+		ctrl_client_readable, c);
+	return 0;
+}
+
+static void ctrl_init(struct tinywl_server *server) {
+	server->ctrl_fd = -1;
+	const char *path = getenv("LIVI_COMPOSITOR_CTRL");
+	if (!path || !*path) {
+		return;
+	}
+	int fd = socket(AF_UNIX, SOCK_STREAM, 0);
+	if (fd < 0) {
+		wlr_log(WLR_ERROR, "livi: control socket() failed: %s", strerror(errno));
+		return;
+	}
+	/* the listen fd is created before forking the UI; keep it out of the child */
+	fcntl(fd, F_SETFD, FD_CLOEXEC);
+	struct sockaddr_un addr = {0};
+	addr.sun_family = AF_UNIX;
+	if (strlen(path) >= sizeof(addr.sun_path)) {
+		wlr_log(WLR_ERROR, "livi: control socket path too long");
+		close(fd);
+		return;
+	}
+	strcpy(addr.sun_path, path);
+	unlink(path);
+	if (bind(fd, (struct sockaddr *)&addr, sizeof(addr)) < 0 || listen(fd, 4) < 0) {
+		wlr_log(WLR_ERROR, "livi: control socket bind/listen failed: %s", strerror(errno));
+		close(fd);
+		return;
+	}
+	struct wl_event_loop *loop = wl_display_get_event_loop(server->wl_display);
+	wl_event_loop_add_fd(loop, fd, WL_EVENT_READABLE, ctrl_accept, server);
+	server->ctrl_fd = fd;
+	wlr_log(WLR_INFO, "livi: control socket at %s", path);
+}
+
 int main(int argc, char *argv[]) {
 	wlr_log_init(getenv("LIVI_WLR_DEBUG") ? WLR_DEBUG : WLR_INFO, NULL);
 	char *startup_cmd = NULL;
@@ -946,6 +1095,9 @@ int main(int argc, char *argv[]) {
 	}
 
 	setenv("WAYLAND_DISPLAY", socket, true);
+	/* LIVI: bring up the control socket before forking the UI so the host can push
+	 * the video content region as soon as it connects */
+	ctrl_init(&server);
 	pid_t startup_pid = -1;
 	if (startup_cmd) {
 		startup_pid = fork();
@@ -960,6 +1112,14 @@ int main(int argc, char *argv[]) {
 	/* LIVI: take the spawned UI down with us */
 	if (startup_pid > 0) {
 		kill(startup_pid, SIGTERM);
+	}
+
+	if (server.ctrl_fd >= 0) {
+		close(server.ctrl_fd);
+		const char *ctrl_path = getenv("LIVI_COMPOSITOR_CTRL");
+		if (ctrl_path) {
+			unlink(ctrl_path);
+		}
 	}
 
 	wl_display_destroy_clients(server.wl_display);
