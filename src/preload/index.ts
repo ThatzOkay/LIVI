@@ -34,7 +34,11 @@ let projectionEventHandlers: Array<ApiCallback> = []
 
 ipcRenderer.on('projection-audio-chunk', (_event, payload: unknown) => {
   if (audioChunkHandler) audioChunkHandler(payload)
-  else audioChunkQueue.push(payload)
+  else {
+    // a window that never shows the visualizer would buffer forever; keep it bounded
+    audioChunkQueue.push(payload)
+    if (audioChunkQueue.length > 32) audioChunkQueue.shift()
+  }
 })
 
 ipcRenderer.on('cluster-video-resolution', (_event, payload: unknown) => {

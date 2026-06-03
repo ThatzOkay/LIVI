@@ -1,12 +1,9 @@
 /*
- * livi-compositor — a minimal nested wlroots compositor for LIVI.
+ * livi-compositor — a nested wlroots compositor for LIVI (based on tinywl, 0.20).
  *
- * Based on the wlroots reference compositor (tinywl, 0.20). The one behavioural
- * change: the FIRST mapped toplevel is treated as the video plane (placed at the
- * bottom of the scene, sized to fill the output, never focused); every later
- * toplevel is the UI, stacked on top. The video client is a GStreamer
- * waylandsink presenting a hardware-decoded dmabuf, which wlr_scene imports and
- * composites zero-copy. The UI (Electron, transparent) blends over it.
+ * One screen per role (LIVI_SCREENS), each a nested output with a transparent Electron
+ * UI on top and tagged GStreamer waylandsink video planes below, composited zero-copy.
+ * The host drives video placement/crop/visibility over a control socket.
  */
 #include <assert.h>
 #include <errno.h>
@@ -24,6 +21,7 @@
 #include <unistd.h>
 #include <wayland-server-core.h>
 #include <wlr/backend.h>
+#include <wlr/backend/multi.h>
 #include <wlr/backend/wayland.h>
 #include <wlr/render/allocator.h>
 #include <wlr/render/wlr_renderer.h>
@@ -51,13 +49,33 @@ enum tinywl_cursor_mode {
 	TINYWL_CURSOR_RESIZE,
 };
 
+// Each screen role gets its own non-overlapping x-slot in the scene
+#define LIVI_SCREEN_X_SLOT 100000
+
+// Per-tag video config, cached until its tagged toplevel appears.
+#define LIVI_MAX_VIDEO_CFGS 16
+struct livi_video_cfg {
+	bool valid;
+	char tag[64];
+	char screen[32];
+	bool has_crop;
+	double crop_l, crop_t, vis_w, vis_h, tier_w, tier_h;
+	bool has_visible;
+	bool visible;
+};
+
 struct tinywl_server {
 	struct wl_display *wl_display;
-	struct wlr_backend *backend;
+	struct wlr_backend *backend;     // multi-backend from autocreate
+	struct wlr_backend *wl_backend;  // the nested wayland sub-backend (for new outputs)
 	struct wlr_renderer *renderer;
 	struct wlr_allocator *allocator;
 	struct wlr_scene *scene;
 	struct wlr_scene_output_layout *scene_layout;
+	// fixed z-order layers (bottom -> top): backdrop, video planes, UI
+	struct wlr_scene_tree *layer_bg;
+	struct wlr_scene_tree *layer_video;
+	struct wlr_scene_tree *layer_ui;
 
 	struct wlr_xdg_shell *xdg_shell;
 	struct wl_listener new_xdg_toplevel;
@@ -93,30 +111,22 @@ struct tinywl_server {
 	struct wl_list outputs;
 	struct wl_listener new_output;
 
-	// LIVI: the bottom video plane, the UI on top, and the output dimensions
-	struct tinywl_toplevel *video_toplevel;
-	struct tinywl_toplevel *ui_toplevel;
-	int32_t output_width, output_height;
-
-	// LIVI: AA content region for the video plane, pushed over the control socket
-	// (LIVI_COMPOSITOR_CTRL). Crops the phone's letter/pillarbox margins out of the
-	// 16:9 transport tier so the user-chosen content fills the output, zero-copy.
-	bool has_crop;
-	double crop_l, crop_t, vis_w, vis_h, tier_w, tier_h;
+	// one screen per role (LIVI_SCREENS: main, dash, aux ...)
+	struct livi_screen *screens;
+	int n_screens;
+	struct livi_screen *pending_screen;   // next new output binds here (NULL -> main)
+	char pending_video_tags[LIVI_MAX_VIDEO_CFGS][64];
+	int n_pending_video_tags;
+	struct wl_list videos;        // video toplevels, found by tag
+	struct livi_video_cfg video_cfgs[LIVI_MAX_VIDEO_CFGS];
 	int ctrl_fd;
-
-	// LIVI: opaque backdrop at the very bottom, so nothing behind the compositor shows
-	// through the transparent UI before the video plane exists. Colour follows the LIVI
-	// theme background, pushed over the control socket (black until set).
-	struct wlr_scene_rect *backdrop;
-	float backdrop_color[4];
-	bool has_backdrop_color;
 };
 
 struct tinywl_output {
 	struct wl_list link;
 	struct tinywl_server *server;
 	struct wlr_output *wlr_output;
+	struct livi_screen *screen;
 	struct wl_listener frame;
 	struct wl_listener request_state;
 	struct wl_listener destroy;
@@ -125,9 +135,15 @@ struct tinywl_output {
 struct tinywl_toplevel {
 	struct wl_list link;
 	struct tinywl_server *server;
+	struct livi_screen *screen;
 	struct wlr_xdg_toplevel *xdg_toplevel;
 	struct wlr_scene_tree *scene_tree;
 	bool is_video;
+	// video plane: tag (claim) + AA crop region; placed by apply_video_layout
+	char tag[64];
+	bool has_crop;
+	double crop_l, crop_t, vis_w, vis_h, tier_w, tier_h;
+	struct wl_list video_link;   // in server->videos
 	struct wl_listener map;
 	struct wl_listener unmap;
 	struct wl_listener commit;
@@ -153,6 +169,101 @@ struct tinywl_keyboard {
 	struct wl_listener key;
 	struct wl_listener destroy;
 };
+
+// One output + its UI plane + backdrop. Video planes are tagged, looked up separately.
+struct livi_screen {
+	char role[32];
+	struct wlr_output *wlr_output;
+	int32_t x;                       // layout x-offset in the scene
+	int32_t width, height;
+
+	struct tinywl_toplevel *ui;      // UI plane (Electron), on top
+
+	struct wlr_scene_rect *backdrop;
+	float backdrop_color[4];
+	bool has_backdrop_color;
+};
+
+static struct livi_screen *screen_by_role(struct tinywl_server *server, const char *role) {
+	for (int i = 0; i < server->n_screens; i++) {
+		if (strcmp(server->screens[i].role, role) == 0) {
+			return &server->screens[i];
+		}
+	}
+	return NULL;
+}
+
+// Map a touch/pointer device's output name (each nested output has its own) to its screen.
+static struct livi_screen *screen_for_output_name(struct tinywl_server *server,
+		const char *name) {
+	if (name == NULL) {
+		return NULL;
+	}
+	struct tinywl_output *o;
+	wl_list_for_each(o, &server->outputs, link) {
+		if (o->wlr_output->name && strcmp(o->wlr_output->name, name) == 0) {
+			return o->screen;
+		}
+	}
+	return NULL;
+}
+
+static struct tinywl_toplevel *find_video_by_tag(struct tinywl_server *server,
+		const char *tag) {
+	struct tinywl_toplevel *t;
+	wl_list_for_each(t, &server->videos, video_link) {
+		if (strcmp(t->tag, tag) == 0) {
+			return t;
+		}
+	}
+	return NULL;
+}
+
+static void apply_video_layout(struct tinywl_toplevel *video);
+
+static struct livi_video_cfg *cfg_for_tag(struct tinywl_server *server, const char *tag,
+		bool create) {
+	for (int i = 0; i < LIVI_MAX_VIDEO_CFGS; i++) {
+		if (server->video_cfgs[i].valid && strcmp(server->video_cfgs[i].tag, tag) == 0) {
+			return &server->video_cfgs[i];
+		}
+	}
+	if (!create) {
+		return NULL;
+	}
+	for (int i = 0; i < LIVI_MAX_VIDEO_CFGS; i++) {
+		if (!server->video_cfgs[i].valid) {
+			struct livi_video_cfg *c = &server->video_cfgs[i];
+			memset(c, 0, sizeof(*c));
+			snprintf(c->tag, sizeof(c->tag), "%s", tag);
+			c->valid = true;
+			return c;
+		}
+	}
+	return NULL;
+}
+
+// Apply a cached cfg (screen + crop + visibility) to a video toplevel.
+static void apply_cfg_to_video(struct tinywl_server *server, struct livi_video_cfg *cfg,
+		struct tinywl_toplevel *v) {
+	if (cfg->screen[0]) {
+		struct livi_screen *s = screen_by_role(server, cfg->screen);
+		if (s) {
+			v->screen = s;
+		}
+		v->has_crop = cfg->has_crop;
+		v->crop_l = cfg->crop_l;
+		v->crop_t = cfg->crop_t;
+		v->vis_w = cfg->vis_w;
+		v->vis_h = cfg->vis_h;
+		v->tier_w = cfg->tier_w;
+		v->tier_h = cfg->tier_h;
+		apply_video_layout(v);
+	}
+	if (cfg->has_visible) {
+		wlr_scene_node_set_enabled(&v->scene_tree->node, cfg->visible);
+	}
+}
 
 static void focus_toplevel(struct tinywl_toplevel *toplevel) {
 	if (toplevel == NULL) {
@@ -286,6 +397,12 @@ static void server_new_keyboard(struct tinywl_server *server,
 static void server_new_pointer(struct tinywl_server *server,
 		struct wlr_input_device *device) {
 	wlr_cursor_attach_input_device(server->cursor, device);
+	// each nested output has its own pointer; pin it to that output's region
+	struct wlr_pointer *pointer = wlr_pointer_from_input_device(device);
+	struct livi_screen *s = screen_for_output_name(server, pointer->output_name);
+	if (s != NULL && s->wlr_output != NULL) {
+		wlr_cursor_map_input_to_output(server->cursor, device, s->wlr_output);
+	}
 }
 
 static void server_new_input(struct wl_listener *listener, void *data) {
@@ -497,14 +614,18 @@ static void server_cursor_frame(struct wl_listener *listener, void *data) {
 	wlr_seat_pointer_notify_frame(server->seat);
 }
 
-/* LIVI: touch. Event coords are [0,1] over the single output at layout (0,0),
- * so scale by the output size to find the surface under the touch point. */
+/* LIVI: touch. Event coords are [0,1] over the output the touch came from; map to that
+ * output's screen and scale by its size to find the surface under the touch point. */
 static void server_touch_down(struct wl_listener *listener, void *data) {
 	struct tinywl_server *server = wl_container_of(listener, server, touch_down);
 	struct wlr_touch_down_event *event = data;
 
-	double lx = event->x * server->output_width;
-	double ly = event->y * server->output_height;
+	struct livi_screen *ts = screen_for_output_name(server, event->touch->output_name);
+	if (ts == NULL) {
+		ts = server->n_screens > 0 ? &server->screens[0] : NULL;
+	}
+	double lx = ts ? ts->x + event->x * ts->width : 0;
+	double ly = ts ? event->y * ts->height : 0;
 	double sx, sy;
 	struct wlr_surface *surface = NULL;
 	desktop_toplevel_at(server, lx, ly, &surface, &sx, &sy);
@@ -518,8 +639,12 @@ static void server_touch_motion(struct wl_listener *listener, void *data) {
 	struct tinywl_server *server = wl_container_of(listener, server, touch_motion);
 	struct wlr_touch_motion_event *event = data;
 
-	double lx = event->x * server->output_width;
-	double ly = event->y * server->output_height;
+	struct livi_screen *ts = screen_for_output_name(server, event->touch->output_name);
+	if (ts == NULL) {
+		ts = server->n_screens > 0 ? &server->screens[0] : NULL;
+	}
+	double lx = ts ? ts->x + event->x * ts->width : 0;
+	double ly = ts ? event->y * ts->height : 0;
 	double sx, sy;
 	struct wlr_surface *surface = NULL;
 	desktop_toplevel_at(server, lx, ly, &surface, &sx, &sy);
@@ -554,40 +679,41 @@ static void output_frame(struct wl_listener *listener, void *data) {
 	wlr_scene_output_send_frame_done(scene_output, &now);
 }
 
-/* LIVI: size and position the video plane to the AA content region so the user-chosen
- * content fills the output and the phone's letter/pillarbox margins overflow off the
- * output edge (which the scene clips) */
-static void apply_video_layout(struct tinywl_server *server) {
-	struct tinywl_toplevel *video = server->video_toplevel;
-	if (video == NULL || !video->xdg_toplevel->base->initialized) {
+// Size+position a video plane so its AA content region fills the screen, margins
+// overflowing off the output edge (the scene clips them). Zero-copy.
+static void apply_video_layout(struct tinywl_toplevel *video) {
+	struct livi_screen *s = video->screen;
+	if (s == NULL || !video->xdg_toplevel->base->initialized) {
 		return;
 	}
-	int ow = server->output_width, oh = server->output_height;
+	int ow = s->width, oh = s->height;
 	if (ow <= 0 || oh <= 0) {
 		return;
 	}
-	if (!server->has_crop || server->vis_w <= 0 || server->vis_h <= 0 ||
-			server->tier_w <= 0 || server->tier_h <= 0) {
+	if (!video->has_crop || video->vis_w <= 0 || video->vis_h <= 0 ||
+			video->tier_w <= 0 || video->tier_h <= 0) {
 		wlr_xdg_toplevel_set_size(video->xdg_toplevel, ow, oh);
-		wlr_scene_node_set_position(&video->scene_tree->node, 0, 0);
+		wlr_scene_node_set_position(&video->scene_tree->node, s->x, 0);
+		wlr_log(WLR_INFO, "livi[%s/%s]: video fill output %dx%d pos %d,0",
+			s->role, video->tag, ow, oh, s->x);
 		return;
 	}
 	/* contain the content into the output (uniform scale; bars only on AR mismatch) */
-	double sx = (double)ow / server->vis_w;
-	double sy = (double)oh / server->vis_h;
-	double scale = sx < sy ? sx : sy;
-	double off_x = (ow - server->vis_w * scale) / 2.0;
-	double off_y = (oh - server->vis_h * scale) / 2.0;
-	int tw = (int)lround(server->tier_w * scale);
-	int th = (int)lround(server->tier_h * scale);
-	int px = (int)lround(off_x - server->crop_l * scale);
-	int py = (int)lround(off_y - server->crop_t * scale);
+	double scx = (double)ow / video->vis_w;
+	double scy = (double)oh / video->vis_h;
+	double scale = scx < scy ? scx : scy;
+	double off_x = (ow - video->vis_w * scale) / 2.0;
+	double off_y = (oh - video->vis_h * scale) / 2.0;
+	int tw = (int)lround(video->tier_w * scale);
+	int th = (int)lround(video->tier_h * scale);
+	int px = (int)lround(s->x + off_x - video->crop_l * scale);
+	int py = (int)lround(off_y - video->crop_t * scale);
 	wlr_xdg_toplevel_set_size(video->xdg_toplevel, tw, th);
 	wlr_scene_node_set_position(&video->scene_tree->node, px, py);
 	wlr_log(WLR_INFO,
-		"livi: video crop content=%gx%g tier=%gx%g crop=%g,%g output=%dx%d -> size %dx%d pos %d,%d",
-		server->vis_w, server->vis_h, server->tier_w, server->tier_h,
-		server->crop_l, server->crop_t, ow, oh, tw, th, px, py);
+		"livi[%s/%s]: video crop content=%gx%g tier=%gx%g crop=%g,%g output=%dx%d -> size %dx%d pos %d,%d",
+		s->role, video->tag, video->vis_w, video->vis_h, video->tier_w, video->tier_h,
+		video->crop_l, video->crop_t, ow, oh, tw, th, px, py);
 }
 
 static void output_request_state(struct wl_listener *listener, void *data) {
@@ -595,26 +721,47 @@ static void output_request_state(struct wl_listener *listener, void *data) {
 	const struct wlr_output_event_request_state *event = data;
 	wlr_output_commit_state(output->wlr_output, event->state);
 
-	/* LIVI: track the output size and reflow the video plane (crop-aware) + UI */
-	output->server->output_width = output->wlr_output->width;
-	output->server->output_height = output->wlr_output->height;
-	apply_video_layout(output->server);
-	struct tinywl_toplevel *ui = output->server->ui_toplevel;
-	if (ui != NULL && ui->xdg_toplevel->base->initialized) {
-		wlr_xdg_toplevel_set_size(ui->xdg_toplevel,
-			output->server->output_width, output->server->output_height);
+	struct livi_screen *s = output->screen;
+	if (s == NULL) {
+		return;
 	}
-	if (output->server->backdrop) {
-		wlr_scene_rect_set_size(output->server->backdrop,
-			output->server->output_width, output->server->output_height);
+	/* LIVI: track the screen size and reflow its UI + every video plane on it + backdrop */
+	s->width = output->wlr_output->width;
+	s->height = output->wlr_output->height;
+	struct tinywl_toplevel *v;
+	wl_list_for_each(v, &output->server->videos, video_link) {
+		if (v->screen == s) {
+			apply_video_layout(v);
+		}
+	}
+	if (s->ui != NULL && s->ui->xdg_toplevel->base->initialized) {
+		wlr_xdg_toplevel_set_size(s->ui->xdg_toplevel, s->width, s->height);
+		wlr_scene_node_set_position(&s->ui->scene_tree->node, s->x, 0);
+	}
+	if (s->backdrop) {
+		wlr_scene_rect_set_size(s->backdrop, s->width, s->height);
 	}
 }
 
 static void output_destroy(struct wl_listener *listener, void *data) {
 	struct tinywl_output *output = wl_container_of(listener, output, destroy);
+	struct livi_screen *s = output->screen;
 
-	/* LIVI: the host closed our nested window -> shut the compositor down */
-	wl_display_terminate(output->server->wl_display);
+	if (s != NULL) {
+		s->wlr_output = NULL;
+		if (s->backdrop != NULL) {
+			wlr_scene_node_destroy(&s->backdrop->node);
+			s->backdrop = NULL;
+		}
+		if (s == &output->server->screens[0]) {
+			/* LIVI: the main window is gone -> the app is closing, take everything down */
+			wlr_log(WLR_INFO, "livi: main output gone -> shutting down");
+			wl_display_terminate(output->server->wl_display);
+		} else if (s->ui != NULL && s->ui->xdg_toplevel->base->initialized) {
+			/* a secondary host window was closed directly -> ask its UI to close too */
+			wlr_xdg_toplevel_send_close(s->ui->xdg_toplevel);
+		}
+	}
 
 	wl_list_remove(&output->frame.link);
 	wl_list_remove(&output->request_state.link);
@@ -634,8 +781,7 @@ static void server_new_output(struct wl_listener *listener, void *data) {
 	wlr_output_state_init(&state);
 	wlr_output_state_set_enabled(&state, true);
 
-	/* LIVI: size the nested window to LIVI_OUTPUT_SIZE ("WxH", default 1280x720);
-	 * the UI and the video plane are then sized to fill it. */
+	// nested window size from LIVI_OUTPUT_SIZE ("WxH", default 1280x720)
 	int ow = 1280, oh = 720;
 	const char *size = getenv("LIVI_OUTPUT_SIZE");
 	if (size != NULL) {
@@ -650,21 +796,29 @@ static void server_new_output(struct wl_listener *listener, void *data) {
 	wlr_output_commit_state(wlr_output, &state);
 	wlr_output_state_finish(&state);
 
-	// Match the installed LIVI.desktop (basename "LIVI") so the host taskbar shows
-	// its icon; override with LIVI_OUTPUT_APP_ID if the .desktop name differs
+	/* LIVI: bind to the host-requested screen (NULL -> main); each role keeps its own
+	 * x-slot so its nested window renders just that screen's content */
+	struct livi_screen *s = server->pending_screen ? server->pending_screen
+		: &server->screens[0];
+	server->pending_screen = NULL;
+	s->wlr_output = wlr_output;
+	s->width = wlr_output->width;
+	s->height = wlr_output->height;
+	s->x = (int32_t)(s - server->screens) * LIVI_SCREEN_X_SLOT;
+	wlr_log(WLR_INFO, "livi: new output -> screen '%s' at x=%d (%dx%d)",
+		s->role, s->x, s->width, s->height);
+
+	// title = role (so nested windows are distinguishable); app_id = the .desktop name
 	if (wlr_output_is_wl(wlr_output)) {
-		wlr_wl_output_set_title(wlr_output, "LIVI");
+		wlr_wl_output_set_title(wlr_output, s->role);
 		const char *app_id = getenv("LIVI_OUTPUT_APP_ID");
 		wlr_wl_output_set_app_id(wlr_output, app_id ? app_id : "LIVI");
 	}
 
-	/* LIVI: remember the output dimensions to size the video plane */
-	server->output_width = wlr_output->width;
-	server->output_height = wlr_output->height;
-
 	struct tinywl_output *output = calloc(1, sizeof(*output));
 	output->wlr_output = wlr_output;
 	output->server = server;
+	output->screen = s;
 
 	output->frame.notify = output_frame;
 	wl_signal_add(&wlr_output->events.frame, &output->frame);
@@ -677,38 +831,57 @@ static void server_new_output(struct wl_listener *listener, void *data) {
 
 	wl_list_insert(&server->outputs, &output->link);
 
-	struct wlr_output_layout_output *l_output = wlr_output_layout_add_auto(server->output_layout,
-		wlr_output);
+	struct wlr_output_layout_output *l_output = wlr_output_layout_add(server->output_layout,
+		wlr_output, s->x, 0);
 	struct wlr_scene_output *scene_output = wlr_scene_output_create(server->scene, wlr_output);
 	wlr_scene_output_layout_add_output(server->scene_layout, l_output, scene_output);
 
-	if (server->backdrop == NULL) {
-		float black[4] = {0.0f, 0.0f, 0.0f, 1.0f};
-		float magenta[4] = {0.55f, 0.0f, 0.55f, 1.0f};
-		const float *color = getenv("LIVI_DEBUG_BG") ? magenta
-			: server->has_backdrop_color ? server->backdrop_color : black;
-		server->backdrop = wlr_scene_rect_create(&server->scene->tree,
-			server->output_width, server->output_height, color);
-		wlr_scene_node_lower_to_bottom(&server->backdrop->node);
+	/* per-screen opaque backdrop at the screen's x-offset, lowered to the very bottom */
+	float black[4] = {0.0f, 0.0f, 0.0f, 1.0f};
+	float magenta[4] = {0.55f, 0.0f, 0.55f, 1.0f};
+	const float *color = getenv("LIVI_DEBUG_BG") ? magenta
+		: s->has_backdrop_color ? s->backdrop_color : black;
+	s->backdrop = wlr_scene_rect_create(server->layer_bg, s->width, s->height, color);
+	wlr_scene_node_set_position(&s->backdrop->node, s->x, 0);
+
+	/* a UI/video toplevel may have mapped before this output existed; reflow onto it now */
+	if (s->ui != NULL && s->ui->xdg_toplevel->base->initialized) {
+		wlr_scene_node_set_position(&s->ui->scene_tree->node, s->x, 0);
+		wlr_xdg_toplevel_set_size(s->ui->xdg_toplevel, s->width, s->height);
+	}
+	struct tinywl_toplevel *v;
+	wl_list_for_each(v, &server->videos, video_link) {
+		if (v->screen == s) {
+			apply_video_layout(v);
+		}
 	}
 }
 
 static void xdg_toplevel_map(struct wl_listener *listener, void *data) {
 	struct tinywl_toplevel *toplevel = wl_container_of(listener, toplevel, map);
 
+	struct livi_screen *s = toplevel->screen;
+
 	wl_list_insert(&toplevel->server->toplevels, &toplevel->link);
 
 	if (toplevel->is_video) {
-		/* LIVI: keep the video plane at the bottom, never focus it; size+position it
-		 * to the AA content region (or fill the output if none set yet) */
-		wlr_scene_node_lower_to_bottom(&toplevel->scene_tree->node);
-		if (toplevel->server->backdrop) {
-			wlr_scene_node_lower_to_bottom(&toplevel->server->backdrop->node);
+		// within the video layer: the main stream sits above secondary streams (cluster)
+		if (strcmp(toplevel->tag, "main") == 0) {
+			wlr_scene_node_raise_to_top(&toplevel->scene_tree->node);
+		} else {
+			wlr_scene_node_lower_to_bottom(&toplevel->scene_tree->node);
 		}
-		apply_video_layout(toplevel->server);
+		apply_video_layout(toplevel);
 		return;
 	}
 
+	/* UI plane: pin it to its screen's x-offset, fill the screen, then focus it */
+	if (s) {
+		wlr_scene_node_set_position(&toplevel->scene_tree->node, s->x, 0);
+		if (s->width > 0 && s->height > 0) {
+			wlr_xdg_toplevel_set_size(toplevel->xdg_toplevel, s->width, s->height);
+		}
+	}
 	focus_toplevel(toplevel);
 }
 
@@ -726,37 +899,75 @@ static void xdg_toplevel_commit(struct wl_listener *listener, void *data) {
 	struct tinywl_toplevel *toplevel = wl_container_of(listener, toplevel, commit);
 	struct tinywl_server *server = toplevel->server;
 
-	if (toplevel->xdg_toplevel->base->initial_commit) {
-		/* LIVI: the UI (Electron) connects first; waylandsink video planes are
-		 * created later when frames arrive. So the first toplevel is the UI and
-		 * every later one is a video plane, lowered behind it. */
+	if (toplevel->xdg_toplevel->base->initial_commit && toplevel->screen == NULL) {
+		// classify + route: Electron UI windows use app_id "livi" (routed by their
+		// "livi:<role>" title, untitled -> main); video planes are waylandsink with
+		// app_id "livi-video" and carry the claim tag.
 		const char *app_id = toplevel->xdg_toplevel->app_id;
-		bool is_video = server->ui_toplevel != NULL;
-		toplevel->is_video = is_video;
-		if (is_video) {
-			if (server->video_toplevel == NULL) server->video_toplevel = toplevel;
-		} else {
-			server->ui_toplevel = toplevel;
-		}
-		wlr_log(WLR_INFO, "livi: client app_id='%s' -> %s",
-			app_id ? app_id : "(null)", is_video ? "video" : "ui");
+		const char *title = toplevel->xdg_toplevel->title;
+		bool is_ui = app_id && strcmp(app_id, "livi") == 0;
+		struct livi_screen *s = NULL;
 
-		/* Both the video plane and the transparent UI span the whole output */
-		wlr_xdg_toplevel_set_size(toplevel->xdg_toplevel,
-			server->output_width, server->output_height);
+		if (is_ui) {
+			if (title && strncmp(title, "livi:", 5) == 0) {
+				s = screen_by_role(server, title + 5);
+			}
+			if (s == NULL) {
+				s = &server->screens[0];   // untitled UI (main) -> main
+			}
+			s->ui = toplevel;
+			toplevel->is_video = false;
+		} else {
+			toplevel->is_video = true;
+			if (server->n_pending_video_tags > 0) {
+				// take the oldest claim (FIFO; claims arrive in plane-creation order)
+				snprintf(toplevel->tag, sizeof(toplevel->tag), "%s",
+					server->pending_video_tags[0]);
+				for (int i = 1; i < server->n_pending_video_tags; i++) {
+					memcpy(server->pending_video_tags[i - 1],
+						server->pending_video_tags[i],
+						sizeof(server->pending_video_tags[0]));
+				}
+				server->n_pending_video_tags--;
+			}
+			s = &server->screens[0];   // default; videocfg moves it to its target screen
+			wl_list_insert(&server->videos, &toplevel->video_link);
+		}
+		toplevel->screen = s;
+		// fixed z-order: UI always on top of the video layer, video above the backdrop
+		wlr_scene_node_reparent(&toplevel->scene_tree->node,
+			toplevel->is_video ? server->layer_video : server->layer_ui);
+		wlr_log(WLR_INFO, "livi: app_id='%s' title='%s' tag='%s' -> %s on screen '%s'",
+			app_id ? app_id : "(null)", title ? title : "(null)", toplevel->tag,
+			toplevel->is_video ? "video" : "ui", s->role);
+
+		/* the transparent UI and each video plane span their screen initially */
+		wlr_xdg_toplevel_set_size(toplevel->xdg_toplevel, s->width, s->height);
+
+		/* a videocfg/videoshow may have arrived before this surface existed; apply it */
+		if (toplevel->is_video && toplevel->tag[0]) {
+			struct livi_video_cfg *cfg = cfg_for_tag(server, toplevel->tag, false);
+			if (cfg != NULL) {
+				apply_cfg_to_video(server, cfg, toplevel);
+			}
+		}
 	}
 }
 
 static void xdg_toplevel_destroy(struct wl_listener *listener, void *data) {
 	struct tinywl_toplevel *toplevel = wl_container_of(listener, toplevel, destroy);
 
-	if (toplevel->server->video_toplevel == toplevel) {
-		toplevel->server->video_toplevel = NULL;
+	if (toplevel->is_video) {
+		wl_list_remove(&toplevel->video_link);
 	}
-	if (toplevel->server->ui_toplevel == toplevel) {
-		toplevel->server->ui_toplevel = NULL;
-		/* LIVI: the UI quit -> nothing left to host */
-		wl_display_terminate(toplevel->server->wl_display);
+	struct livi_screen *s = toplevel->screen;
+	if (s != NULL && s->ui == toplevel) {
+		s->ui = NULL;
+		/* LIVI: the main UI quit -> the app is closing, take everything down */
+		if (toplevel->server->n_screens > 0 && s == &toplevel->server->screens[0]) {
+			wlr_log(WLR_INFO, "livi: main UI toplevel gone -> shutting down");
+			wl_display_terminate(toplevel->server->wl_display);
+		}
 	}
 
 	wl_list_remove(&toplevel->map.link);
@@ -773,9 +984,7 @@ static void xdg_toplevel_destroy(struct wl_listener *listener, void *data) {
 
 static void begin_interactive(struct tinywl_toplevel *toplevel,
 		enum tinywl_cursor_mode mode, uint32_t edges) {
-	/* LIVI: the UI and the video plane always fill the output; clients never get
-	 * to move or resize themselves. The outer (host) window is the one to resize,
-	 * and output_request_state reflows everything to the new size. */
+	// clients never move/resize themselves; the host window resizes, we reflow
 	(void)toplevel;
 	(void)mode;
 	(void)edges;
@@ -819,6 +1028,7 @@ static void server_new_xdg_toplevel(struct wl_listener *listener, void *data) {
 	struct tinywl_toplevel *toplevel = calloc(1, sizeof(*toplevel));
 	toplevel->server = server;
 	toplevel->xdg_toplevel = xdg_toplevel;
+	wl_list_init(&toplevel->video_link);   // so destroy's wl_list_remove is always safe
 	toplevel->scene_tree =
 		wlr_scene_xdg_surface_create(&toplevel->server->scene->tree, xdg_toplevel->base);
 	toplevel->scene_tree->node.data = toplevel;
@@ -879,10 +1089,9 @@ static void server_new_xdg_popup(struct wl_listener *listener, void *data) {
 	wl_signal_add(&xdg_popup->events.destroy, &popup->destroy);
 }
 
-/* LIVI control socket (LIVI_COMPOSITOR_CTRL): a tiny line protocol the Electron main
- * process uses to push the AA video content region. One command for now:
- *   videocrop <role> <cropL> <cropT> <visW> <visH> <tierW> <tierH>\n
- * `role` is reserved for multi-output routing */
+// Control socket (LIVI_COMPOSITOR_CTRL): line protocol from the host. Commands:
+//   screen <role> <0|1> | claim <tag> | videocfg <tag> <screen> <crop...>
+//   videoshow <tag> <0|1> | backdrop <r> <g> <b>
 struct livi_ctrl_client {
 	struct tinywl_server *server;
 	struct wl_event_source *source;
@@ -891,29 +1100,76 @@ struct livi_ctrl_client {
 };
 
 static void ctrl_handle_line(struct tinywl_server *server, const char *line) {
-	char role[32];
+	char tag[64], srole[32];
 	double cl, ct, vw, vh, tw, th;
-	if (sscanf(line, "videocrop %31s %lf %lf %lf %lf %lf %lf",
-			role, &cl, &ct, &vw, &vh, &tw, &th) == 7) {
-		server->has_crop = vw > 0 && vh > 0;
-		server->crop_l = cl;
-		server->crop_t = ct;
-		server->vis_w = vw;
-		server->vis_h = vh;
-		server->tier_w = tw;
-		server->tier_h = th;
-		apply_video_layout(server);
+	int onoff;
+
+	// open/close a role's nested output window (its own movable host window)
+	if (sscanf(line, "screen %31s %d", srole, &onoff) == 2) {
+		struct livi_screen *s = screen_by_role(server, srole);
+		if (s != NULL && server->wl_backend != NULL) {
+			if (onoff && s->wlr_output == NULL) {
+				server->pending_screen = s;
+				wlr_wl_output_create(server->wl_backend);   // fires server_new_output now
+			} else if (!onoff && s->wlr_output != NULL) {
+				wlr_output_destroy(s->wlr_output);          // fires output_destroy
+			}
+		}
+		return;
+	}
+	if (sscanf(line, "claim %63s", tag) == 1) {
+		if (server->n_pending_video_tags < LIVI_MAX_VIDEO_CFGS) {
+			snprintf(server->pending_video_tags[server->n_pending_video_tags],
+				sizeof(server->pending_video_tags[0]), "%s", tag);
+			server->n_pending_video_tags++;
+		}
+		return;
+	}
+	// cached per tag, applied now or when the tagged toplevel first appears
+	if (sscanf(line, "videocfg %63s %31s %lf %lf %lf %lf %lf %lf",
+			tag, srole, &cl, &ct, &vw, &vh, &tw, &th) == 8) {
+		struct livi_video_cfg *cfg = cfg_for_tag(server, tag, true);
+		if (cfg != NULL) {
+			snprintf(cfg->screen, sizeof(cfg->screen), "%s", srole);
+			cfg->has_crop = vw > 0 && vh > 0;
+			cfg->crop_l = cl;
+			cfg->crop_t = ct;
+			cfg->vis_w = vw;
+			cfg->vis_h = vh;
+			cfg->tier_w = tw;
+			cfg->tier_h = th;
+			struct tinywl_toplevel *v = find_video_by_tag(server, tag);
+			if (v != NULL) {
+				apply_cfg_to_video(server, cfg, v);
+			}
+		}
+		return;
+	}
+	if (sscanf(line, "videoshow %63s %d", tag, &onoff) == 2) {
+		struct livi_video_cfg *cfg = cfg_for_tag(server, tag, true);
+		if (cfg != NULL) {
+			cfg->has_visible = true;
+			cfg->visible = onoff != 0;
+		}
+		struct tinywl_toplevel *v = find_video_by_tag(server, tag);
+		if (v != NULL) {
+			wlr_scene_node_set_enabled(&v->scene_tree->node, onoff != 0);
+		}
 		return;
 	}
 	int r, g, b;
 	if (sscanf(line, "backdrop %d %d %d", &r, &g, &b) == 3) {
-		server->backdrop_color[0] = (float)r / 255.0f;
-		server->backdrop_color[1] = (float)g / 255.0f;
-		server->backdrop_color[2] = (float)b / 255.0f;
-		server->backdrop_color[3] = 1.0f;
-		server->has_backdrop_color = true;
-		if (server->backdrop && !getenv("LIVI_DEBUG_BG")) {
-			wlr_scene_rect_set_color(server->backdrop, server->backdrop_color);
+		bool dbg = getenv("LIVI_DEBUG_BG") != NULL;
+		for (int i = 0; i < server->n_screens; i++) {
+			struct livi_screen *s = &server->screens[i];
+			s->backdrop_color[0] = (float)r / 255.0f;
+			s->backdrop_color[1] = (float)g / 255.0f;
+			s->backdrop_color[2] = (float)b / 255.0f;
+			s->backdrop_color[3] = 1.0f;
+			s->has_backdrop_color = true;
+			if (s->backdrop && !dbg) {
+				wlr_scene_rect_set_color(s->backdrop, s->backdrop_color);
+			}
 		}
 	}
 }
@@ -995,6 +1251,15 @@ static void ctrl_init(struct tinywl_server *server) {
 	wlr_log(WLR_INFO, "livi: control socket at %s", path);
 }
 
+// autocreate returns a multi-backend; grab the nested wayland sub-backend so we can
+// open more outputs at runtime
+static void find_wl_backend(struct wlr_backend *backend, void *data) {
+	struct tinywl_server *server = data;
+	if (wlr_backend_is_wl(backend)) {
+		server->wl_backend = backend;
+	}
+}
+
 int main(int argc, char *argv[]) {
 	wlr_log_init(getenv("LIVI_WLR_DEBUG") ? WLR_DEBUG : WLR_INFO, NULL);
 	char *startup_cmd = NULL;
@@ -1016,12 +1281,31 @@ int main(int argc, char *argv[]) {
 	}
 
 	struct tinywl_server server = {0};
+
+	/* LIVI: known screen roles from LIVI_SCREENS; outputs are opened on demand per role */
+	char screens_buf[256];
+	const char *screens_env = getenv("LIVI_SCREENS");
+	snprintf(screens_buf, sizeof(screens_buf), "%s",
+		screens_env && *screens_env ? screens_env : "main,dash,aux");
+	server.screens = calloc(8, sizeof(struct livi_screen));
+	for (char *tok = strtok(screens_buf, ","); tok != NULL && server.n_screens < 8;
+			tok = strtok(NULL, ",")) {
+		snprintf(server.screens[server.n_screens].role,
+			sizeof(server.screens[0].role), "%s", tok);
+		server.n_screens++;
+	}
+	if (server.n_screens == 0) {
+		snprintf(server.screens[0].role, sizeof(server.screens[0].role), "main");
+		server.n_screens = 1;
+	}
+
 	server.wl_display = wl_display_create();
 	server.backend = wlr_backend_autocreate(wl_display_get_event_loop(server.wl_display), NULL);
 	if (server.backend == NULL) {
 		wlr_log(WLR_ERROR, "failed to create wlr_backend");
 		return 1;
 	}
+	wlr_multi_for_each_backend(server.backend, find_wl_backend, &server);
 
 	server.renderer = wlr_renderer_autocreate(server.backend);
 	if (server.renderer == NULL) {
@@ -1053,8 +1337,13 @@ int main(int argc, char *argv[]) {
 
 	server.scene = wlr_scene_create();
 	server.scene_layout = wlr_scene_attach_output_layout(server.scene, server.output_layout);
+	// created in z-order: backdrop (bottom), video planes, UI (top)
+	server.layer_bg = wlr_scene_tree_create(&server.scene->tree);
+	server.layer_video = wlr_scene_tree_create(&server.scene->tree);
+	server.layer_ui = wlr_scene_tree_create(&server.scene->tree);
 
 	wl_list_init(&server.toplevels);
+	wl_list_init(&server.videos);
 	server.xdg_shell = wlr_xdg_shell_create(server.wl_display, 3);
 	server.new_xdg_toplevel.notify = server_new_xdg_toplevel;
 	wl_signal_add(&server.xdg_shell->events.new_toplevel, &server.new_xdg_toplevel);
@@ -1113,10 +1402,11 @@ int main(int argc, char *argv[]) {
 		return 1;
 	}
 
+	// nested backend auto-creates one output -> the main screen. Secondary screens
+	// (dash/aux) are opened on demand by the host via the "screen <role> 1" command.
+
 	setenv("WAYLAND_DISPLAY", socket, true);
-	/* LIVI: bring up the control socket before forking the UI so the host can push
-	 * the video content region as soon as it connects */
-	ctrl_init(&server);
+	ctrl_init(&server);   // before forking the UI, so the host can connect immediately
 	pid_t startup_pid = -1;
 	if (startup_cmd) {
 		startup_pid = fork();
@@ -1170,5 +1460,6 @@ int main(int argc, char *argv[]) {
 	wlr_renderer_destroy(server.renderer);
 	wlr_backend_destroy(server.backend);
 	wl_display_destroy(server.wl_display);
+	free(server.screens);
 	return 0;
 }

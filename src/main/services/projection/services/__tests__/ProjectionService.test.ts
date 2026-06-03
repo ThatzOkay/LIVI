@@ -1026,7 +1026,7 @@ describe('ProjectionService', () => {
 
     on.call(svc, null, 1)
 
-    expect(svc.audio.setVisualizerEnabled).toHaveBeenCalledWith(true)
+    expect(svc.audio.setVisualizerEnabled).toHaveBeenCalledWith(true, undefined)
   })
 
   test('projection-media-read returns default response when file is missing', async () => {

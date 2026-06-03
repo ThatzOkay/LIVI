@@ -9,6 +9,7 @@ import { createProjectionWorker } from '@worker/createProjectionWorker'
 import type { KeyCommand, ProjectionWorker, UsbEvent, WorkerToUI } from '@worker/types'
 import React, { useCallback, useEffect, useLayoutEffect, useMemo, useRef, useState } from 'react'
 import { useLocation, useNavigate } from 'react-router'
+import { useFftPcm } from '../../../hooks/useFftPcm'
 import { useLiviStore, useStatusStore } from '../../../store/store'
 import { useProjectionMultiTouch } from './hooks/useProjectionTouch'
 
@@ -128,10 +129,8 @@ const CarplayComponent: React.FC<CarplayProps> = ({
   useEffect(() => {
     const visible = pathname === '/' || navVideoOverlayActive
     void window.projection.ipc.setVisible(visible).catch(() => {})
-    if (window.app?.compositor) {
-      document.documentElement.classList.toggle('show-video', visible)
-    }
-  }, [pathname, navVideoOverlayActive])
+    document.documentElement.classList.toggle('show-video', visible && receivingVideo)
+  }, [pathname, navVideoOverlayActive, receivingVideo])
 
   useEffect(() => {
     const mode = isAaActiveFlag ? 'AA' : 'dongle'
@@ -270,41 +269,8 @@ const CarplayComponent: React.FC<CarplayProps> = ({
     return w
   }, [audioChannel])
 
-  // Forward audio chunks to FFT
-  useEffect(() => {
-    const timers = new Set<number>()
-
-    const handleAudio = (payload: unknown) => {
-      if (!payload || typeof payload !== 'object') return
-
-      const m = payload as { chunk?: { buffer?: ArrayBuffer } } & Record<string, unknown>
-      const buf = m.chunk?.buffer
-      if (!buf) return
-
-      // mono Int16 from main -> Float32 [-1, 1] for FFT
-      const int16 = new Int16Array(buf)
-      const f32 = new Float32Array(int16.length)
-      for (let i = 0; i < int16.length; i += 1) {
-        f32[i] = int16[i] / 32768
-      }
-
-      const id = window.setTimeout(() => {
-        timers.delete(id)
-        setPcmData(f32)
-      }, fftVisualDelayMs)
-      timers.add(id)
-    }
-
-    window.projection.ipc.onAudioChunk(handleAudio)
-
-    return () => {
-      window.projection.ipc.offAudioChunk(handleAudio)
-      for (const id of timers) {
-        window.clearTimeout(id)
-      }
-      timers.clear()
-    }
-  }, [setPcmData, fftVisualDelayMs])
+  // Forward audio chunks to FFT (shared with the secondary windows via useFftPcm)
+  useFftPcm(fftVisualDelayMs)
 
   // Audio + touch hooks
 

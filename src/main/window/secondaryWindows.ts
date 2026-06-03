@@ -1,9 +1,14 @@
 import { is } from '@electron-toolkit/utils'
 import { configEvents, saveSettings } from '@main/ipc/utils'
+import { setCompositorScreen } from '@main/services/video/GstVideo'
 import { runtimeStateProps } from '@main/types'
 import type { Config, WindowBounds } from '@shared/types'
 import { BrowserWindow, shell } from 'electron'
 import { join } from 'path'
+
+// Inside livi-compositor the host window is the compositor's own output (titled by role);
+// the Electron title only tells the compositor which screen this window belongs to.
+const inCompositor = process.env.LIVI_COMPOSITOR === '1'
 
 export type SecondaryWindowRole = 'dash' | 'aux'
 
@@ -65,6 +70,8 @@ function readBounds(cfg: Config, spec: SecondaryWindowSpec): WindowBounds | unde
 }
 
 function persistBounds(spec: SecondaryWindowSpec, runtimeState: runtimeStateProps) {
+  // In the compositor the host window's geometry is WM-managed
+  if (inCompositor) return
   const win = windows.get(spec.role)
   if (!win || win.isDestroyed()) return
   if (win.isFullScreen() || win.isKiosk()) return
@@ -104,11 +111,12 @@ function spawn(spec: SecondaryWindowSpec, runtimeState: runtimeStateProps) {
     height: bounds?.height ?? h,
     x: bounds?.x,
     y: bounds?.y,
-    title: spec.title,
-    frame: true,
+    title: inCompositor ? `livi:${spec.role}` : spec.title,
+    frame: !inCompositor,
     useContentSize: true,
     autoHideMenuBar: true,
-    backgroundColor: '#000',
+    transparent: inCompositor,
+    backgroundColor: inCompositor || process.platform === 'darwin' ? '#00000000' : '#000',
     webPreferences: {
       preload: join(__dirname, '../preload/index.js'),
       sandbox: false,
@@ -212,6 +220,11 @@ export function syncSecondaryWindows(runtimeState: runtimeStateProps, prev?: Con
       prev &&
       (prev[spec.widthKey] !== cfg[spec.widthKey] || prev[spec.heightKey] !== cfg[spec.heightKey])
     const kioskChanged = prev && (prev.kiosk?.[spec.role] === true) !== getKioskFor(cfg, spec.role)
+
+    // Open/close the role's compositor output before its window appears/closes
+    if (!prev || prev[spec.activeKey] !== cfg[spec.activeKey]) {
+      setCompositorScreen(spec.role, wantActive)
+    }
 
     if (wantActive && !windows.has(spec.role)) {
       spawn(spec, runtimeState)

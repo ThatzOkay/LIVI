@@ -15,6 +15,7 @@ function freshHost() {
   return {
     getConfig: jest.fn(() => ({ cluster: { main: true, dash: false, aux: false } })) as jest.Mock,
     setClusterRequested: jest.fn(),
+    setClusterVisible: jest.fn(),
     resetLastClusterVideoSize: jest.fn(),
     getLastClusterCodec: jest.fn(() => 'h264' as 'h264' | null),
     getClusterTargetWebContents: jest.fn(() => []),

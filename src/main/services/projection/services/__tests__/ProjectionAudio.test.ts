@@ -91,6 +91,20 @@ describe('ProjectionAudio state controls', () => {
     expect(a.visualizerEnabled).toBe(false)
   })
 
+  test('visualizer is reference-counted per window', () => {
+    const a = createSubject()
+
+    a.setVisualizerEnabled(true, 1)
+    a.setVisualizerEnabled(true, 2)
+    expect(a.visualizerEnabled).toBe(true)
+
+    a.setVisualizerEnabled(false, 1)
+    expect(a.visualizerEnabled).toBe(true)
+
+    a.setVisualizerEnabled(false, 2)
+    expect(a.visualizerEnabled).toBe(false)
+  })
+
   test('resetForSessionStart clears stream/session state', () => {
     const a = createSubject()
 
@@ -648,7 +662,7 @@ describe('ProjectionAudio state controls', () => {
     a.getAudioOutputForStream = jest.fn(() => player)
     a.getLogicalStreamKey = jest.fn(() => 'music')
     a.mediaActive = true
-    a.visualizerEnabled = true
+    a.setVisualizerEnabled(true)
 
     a.handleAudioData({ data: new Int16Array([1, 2, 3]), decodeType: 1 })
 

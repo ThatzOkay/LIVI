@@ -38,6 +38,7 @@ struct Player {
 static void ensure_init() {
   static bool done = false;
   if (!done) {
+    g_set_prgname("livi-video");
     gst_init(NULL, NULL);
     // Opt-in verbose decode/sink tracing
     if (const char* dbg = getenv("LIVI_GST_DEBUG")) {

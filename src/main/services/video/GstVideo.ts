@@ -5,19 +5,30 @@ import { resolveGStreamerRoot } from '../audio/gstreamer'
 
 export type GstVideoCodec = 'h264' | 'h265' | 'vp9' | 'av1'
 
-// Linux: the video is composited by livi-compositor, which crops the video plane zero-copy
+// Linux: control channel to livi-compositor. Video planes are addressed by tag (claim),
+// then placed (videocfg) and toggled (videoshow). `state` is resent on reconnect.
 class CompositorControl {
   private socket: net.Socket | null = null
   private connecting = false
-  private readonly pending = new Map<string, string>()
+  private readonly state = new Map<string, string>() // videocfg/videoshow/backdrop, resent
+  private outbox: string[] = [] // one-shot lines (claims), sent once
   private readonly path = process.env.LIVI_COMPOSITOR_CTRL ?? ''
 
   private get enabled(): boolean {
     return process.platform === 'linux' && this.path.length > 0
   }
 
-  setVideoCrop(
-    role: string,
+  // The next new video toplevel gets this tag. Send before creating the waylandsink.
+  claim(tag: string): void {
+    if (!this.enabled) return
+    this.outbox.push(`claim ${tag}\n`)
+    this.flush()
+  }
+
+  // Place + crop the tagged plane on a screen (fullscreen with its own AA content region).
+  videocfg(
+    tag: string,
+    screen: string,
     cropL: number,
     cropT: number,
     visW: number,
@@ -27,26 +38,41 @@ class CompositorControl {
   ): void {
     if (!this.enabled) return
     const n = (v: number): number => Math.round(v)
-    this.pending.set(
-      role,
-      `videocrop ${role} ${n(cropL)} ${n(cropT)} ${n(visW)} ${n(visH)} ${n(tierW)} ${n(tierH)}\n`
+    this.state.set(
+      `cfg:${tag}`,
+      `videocfg ${tag} ${screen} ${n(cropL)} ${n(cropT)} ${n(visW)} ${n(visH)} ${n(tierW)} ${n(tierH)}\n`
     )
     this.flush()
   }
 
-  // Theme background for the compositor backdrop
-  // Kept in sync with themeColors.ts: dark / light
+  // Toggle the tagged plane's visibility.
+  videoshow(tag: string, visible: boolean): void {
+    if (!this.enabled) return
+    this.state.set(`show:${tag}`, `videoshow ${tag} ${visible ? 1 : 0}\n`)
+    this.flush()
+  }
+
+  // Open/close a role's nested output (its own movable host window). Resent on reconnect.
+  screen(role: string, on: boolean): void {
+    if (!this.enabled) return
+    this.state.set(`screen:${role}`, `screen ${role} ${on ? 1 : 0}\n`)
+    this.flush()
+  }
+
+  // Theme background for the compositor backdrop (kept in sync with themeColors.ts).
   setBackdrop(darkMode: boolean): void {
     if (!this.enabled) return
     const [r, g, b] = darkMode ? [0, 0, 0] : [0xd4, 0xd4, 0xd4]
-    this.pending.set('__backdrop__', `backdrop ${r} ${g} ${b}\n`)
+    this.state.set('__backdrop__', `backdrop ${r} ${g} ${b}\n`)
     this.flush()
   }
 
   private flush(): void {
     const s = this.socket
     if (s && !s.destroyed && s.writable) {
-      for (const line of this.pending.values()) s.write(line)
+      for (const line of this.outbox) s.write(line)
+      this.outbox = []
+      for (const line of this.state.values()) s.write(line)
       return
     }
     this.connect()
@@ -59,7 +85,7 @@ class CompositorControl {
     s.on('connect', () => {
       this.connecting = false
       this.socket = s
-      for (const line of this.pending.values()) s.write(line)
+      this.flush()
     })
     s.on('error', () => {
       this.connecting = false
@@ -76,6 +102,11 @@ const compositorControl = new CompositorControl()
 // Push the theme background colour to the compositor backdrop (Linux/compositor only)
 export function setCompositorBackdrop(darkMode: boolean): void {
   compositorControl.setBackdrop(darkMode)
+}
+
+// Open/close a secondary screen's nested output window (Linux/compositor only)
+export function setCompositorScreen(role: string, on: boolean): void {
+  compositorControl.screen(role, on)
 }
 
 export type GstCodecSupport = { hw: boolean; sw: boolean }
@@ -170,9 +201,11 @@ export class GstVideo {
     tierH: number
   } | null = null
 
+  // role = compositor tag for this plane; targetScreen = which screen it's placed on
   constructor(
     private readonly wc: WebContents,
-    private readonly role: string = 'main'
+    private readonly role: string = 'main',
+    private readonly targetScreen: string = 'main'
   ) {}
 
   private windowHandle(): Buffer | null {
@@ -188,6 +221,7 @@ export class GstVideo {
     this.dispose()
     const handle = this.windowHandle()
     if (!handle) return
+    compositorControl.claim(this.role) // Linux: tag the waylandsink toplevel we create next
     this.player = a.createPlayer(codec, handle)
     this.codec = codec
     if (this.player) {
@@ -207,6 +241,7 @@ export class GstVideo {
   // Show/hide the video surface as the user navigates in/out of projection
   setVisible(visible: boolean): void {
     this.visible = visible
+    compositorControl.videoshow(this.role, visible) // Linux: toggle the compositor plane
     if (addon && this.player) addon.setVisible(this.player, visible)
   }
 
@@ -222,8 +257,8 @@ export class GstVideo {
     tierH: number
   ): void {
     this.region = visW > 0 && visH > 0 ? { cropL, cropT, visW, visH, tierW, tierH } : null
-    // Linux: crop happens in the compositor
-    compositorControl.setVideoCrop(this.role, cropL, cropT, visW, visH, tierW, tierH)
+    // Linux: the compositor places + crops the tagged plane on its target screen
+    compositorControl.videocfg(this.role, this.targetScreen, cropL, cropT, visW, visH, tierW, tierH)
     if (addon && this.player) this.applyRegion(addon)
   }
 

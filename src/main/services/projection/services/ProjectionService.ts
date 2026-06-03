@@ -5,8 +5,13 @@ import { ICON_120_B64, ICON_180_B64, ICON_256_B64 } from '@shared/assets/carIcon
 import type { Config, DevListEntry } from '@shared/types'
 import { PhoneWorkMode } from '@shared/types'
 import { isInputCommand } from '@shared/types/InputCommand'
-import type { NavLocale } from '@shared/utils'
-import { aaContentArea, isClusterDisplayed, translateNavigation } from '@shared/utils'
+import type { ClusterScreen, NavLocale } from '@shared/utils'
+import {
+  aaContentArea,
+  clusterTargetScreens,
+  isClusterDisplayed,
+  translateNavigation
+} from '@shared/utils'
 import { app, WebContents } from 'electron'
 import fs from 'fs'
 import path from 'path'
@@ -143,8 +148,9 @@ export class ProjectionService {
     tierW: number
     tierH: number
   } | null = null
-  private gstVideoCluster: GstVideo | null = null
+  private gstVideoClusters = new Map<ClusterScreen, GstVideo>()
   private gstVideoClusterCodec: GstVideoCodec = 'h264'
+  private clusterVisible = false
   private dongleFwVersion?: string
   private boxInfo?: unknown
   private hostDevList: DevListEntry[] = []
@@ -219,6 +225,15 @@ export class ProjectionService {
       this.lastClusterCodec = null
       this.lastClusterVideoWidth = undefined
       this.lastClusterVideoHeight = undefined
+    }
+
+    // Drop cluster planes for screens no longer targeted (re-spawn on demand)
+    const nextScreens = new Set(clusterTargetScreens(this.config))
+    for (const [screen, plane] of this.gstVideoClusters) {
+      if (!nextScreens.has(screen)) {
+        plane.dispose()
+        this.gstVideoClusters.delete(screen)
+      }
     }
 
     // Seed AA's initial NIGHT_MODE
@@ -539,6 +554,7 @@ export class ProjectionService {
           for (const wc of clusterTargets) {
             if (!wc.isDestroyed()) wc.send('cluster-video-resolution', { width: w, height: h })
           }
+          for (const plane of this.gstVideoClusters.values()) this.applyClusterCrop(plane)
         }
 
         if (msg.data) this.pushGstVideoCluster(msg.data)
@@ -769,20 +785,68 @@ export class ProjectionService {
     this.gstVideo.push(this.gstVideoCodec, nal)
   }
 
-  private pushGstVideoCluster(nal: Buffer): void {
-    if (process.platform !== 'linux') return
-    const wc = this.webContents
-    if (!wc || wc.isDestroyed?.()) return
-    if (!this.gstVideoCluster) {
-      this.gstVideoCluster = new GstVideo(wc)
+  private clusterPlaneVisible(screen: ClusterScreen): boolean {
+    return screen === 'main' ? this.clusterVisible : true
+  }
+
+  // The window a cluster plane belongs to: main → main window, dash/aux → ... window
+  // mac embeds the video into this window's native view. Linux ignores the handle and
+  // places the plane on the target compositor screen instead
+  private clusterScreenWebContents(screen: ClusterScreen): WebContents | null {
+    if (screen === 'main') return this.webContents ?? null
+    const w = getSecondaryWindow(screen)
+    return w && !w.isDestroyed() ? w.webContents : null
+  }
+
+  private applyClusterCrop(plane: GstVideo): void {
+    const tw = this.lastClusterVideoWidth ?? 0
+    const th = this.lastClusterVideoHeight ?? 0
+    const dw = this.config.clusterWidth ?? 0
+    const dh = this.config.clusterHeight ?? 0
+    if (tw > 0 && th > 0 && dw > 0 && dh > 0) {
+      const { contentWidth, contentHeight } = aaContentArea(
+        { width: tw, height: th },
+        { width: dw, height: dh }
+      )
+      plane.setContentRegion(
+        Math.max(0, (tw - contentWidth) / 2),
+        Math.max(0, (th - contentHeight) / 2),
+        contentWidth,
+        contentHeight,
+        tw,
+        th
+      )
+    } else {
+      plane.setContentRegion(0, 0, 0, 0, 0, 0)
     }
-    this.gstVideoCluster.push(this.gstVideoClusterCodec, nal)
+  }
+
+  private pushGstVideoCluster(nal: Buffer): void {
+    // one plane per configured screen, all fed the same cluster stream
+    for (const screen of clusterTargetScreens(this.config)) {
+      let plane = this.gstVideoClusters.get(screen)
+      if (!plane) {
+        const wc = this.clusterScreenWebContents(screen)
+        if (!wc || wc.isDestroyed?.()) continue
+        plane = new GstVideo(wc, `cluster-${screen}`, screen)
+        plane.setVisible(this.clusterPlaneVisible(screen))
+        this.applyClusterCrop(plane) // fit to the configured cluster-stream AR
+        this.gstVideoClusters.set(screen, plane)
+      }
+      plane.push(this.gstVideoClusterCodec, nal)
+    }
   }
 
   // Renderer reports whether the projection screen is currently shown
   public setVideoVisible(visible: boolean): void {
     this.gstVideoVisible = visible
     this.gstVideo?.setVisible(visible)
+  }
+
+  // Cluster tab visibility (cluster:request) drives the main-screen plane only
+  public setClusterVisible(visible: boolean): void {
+    this.clusterVisible = visible
+    this.gstVideoClusters.get('main')?.setVisible(visible)
   }
 
   // Cluster channel codec selection
@@ -865,7 +929,8 @@ export class ProjectionService {
         this.emitProjectionEvent(payload)
       },
       (channel, data, chunkSize, extra) => {
-        this.sendChunked(channel, data, chunkSize, extra)
+        // FFT audio chunks must reach every window that can draw the visualizer
+        this.sendChunked(channel, data, chunkSize, extra, this.getAllUiWebContents())
       },
       (pcm, decodeType) => {
         try {
@@ -904,6 +969,7 @@ export class ProjectionService {
       setClusterRequested: (v) => {
         this.clusterRequested = v
       },
+      setClusterVisible: (v) => this.setClusterVisible(v),
       resetLastClusterVideoSize: () => {
         this.lastClusterVideoWidth = undefined
         this.lastClusterVideoHeight = undefined
@@ -918,7 +984,7 @@ export class ProjectionService {
       getDongleFwVersion: () => this.dongleFwVersion,
       emitProjectionEvent: (p) => this.emitProjectionEvent(p),
       setAudioStreamVolume: (s, v) => this.audio.setStreamVolume(s, v),
-      setAudioVisualizerEnabled: (e) => this.audio.setVisualizerEnabled(e)
+      setAudioVisualizerEnabled: (e, id) => this.audio.setVisualizerEnabled(e, id)
     }
     registerProjectionIpc(ipcHost)
 
@@ -1778,8 +1844,8 @@ export class ProjectionService {
       this.gstVideo?.dispose()
       this.gstVideo = null
       this.gstVideoCodec = 'h264'
-      this.gstVideoCluster?.dispose()
-      this.gstVideoCluster = null
+      for (const plane of this.gstVideoClusters.values()) plane.dispose()
+      this.gstVideoClusters.clear()
       this.gstVideoClusterCodec = 'h264'
 
       this.started = false
@@ -1976,6 +2042,25 @@ export class ProjectionService {
     }
     if (out.length === 0 && isAlive(this.webContents)) {
       out.push(this.webContents as WebContents)
+    }
+    return out
+  }
+
+  // Every live UI window (main + secondary). Used for data every window may render,
+  // e.g. the FFT audio chunks, which otherwise only reach the main window.
+  private getAllUiWebContents(): WebContents[] {
+    const alive = (wc: WebContents | null | undefined): wc is WebContents => {
+      try {
+        return !!wc && (typeof wc.isDestroyed !== 'function' || !wc.isDestroyed())
+      } catch {
+        return !!wc
+      }
+    }
+    const out: WebContents[] = []
+    if (alive(this.webContents)) out.push(this.webContents as WebContents)
+    for (const role of ['dash', 'aux'] as const) {
+      const w = getSecondaryWindow(role)
+      if (w && !w.isDestroyed() && alive(w.webContents)) out.push(w.webContents)
     }
     return out
   }

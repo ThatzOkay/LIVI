@@ -72,28 +72,23 @@ export const Cluster: React.FC<ClusterProps> = ({ visible }) => {
     settings?.cluster?.dash === true ||
     settings?.cluster?.aux === true
 
+  // Request the cluster (stream + plane) ONLY while the cluster view is actually shown
+  const showClusterRef = useRef(showCluster)
   useEffect(() => {
-    if (!wantCluster) return
-    if (!renderReady) return
-    void window.projection.ipc.requestCluster(true).catch(() => {})
-  }, [renderReady, wantCluster])
+    showClusterRef.current = showCluster
+  }, [showCluster])
 
-  const prevClusterVisibleRef = useRef(false)
   useEffect(() => {
-    const wasVisible = prevClusterVisibleRef.current
-    prevClusterVisibleRef.current = showCluster
-    if (!showCluster || wasVisible) return
-    if (!wantCluster || !renderReady) return
-    void window.projection.ipc.requestCluster(true).catch(() => {})
+    if (!renderReady) return
+    void window.projection.ipc.requestCluster(showCluster && wantCluster).catch(() => {})
   }, [showCluster, wantCluster, renderReady])
 
   useEffect(() => {
     const handler = (_evt: unknown, ...args: unknown[]) => {
       const msg = (args[0] ?? {}) as { type?: string }
       if (msg.type !== 'plugged') return
-      if (!wantCluster) return
-      if (!renderReady) return
-      void window.projection.ipc.requestCluster(true).catch(() => {})
+      if (!wantCluster || !renderReady) return
+      void window.projection.ipc.requestCluster(showClusterRef.current).catch(() => {})
     }
     const unsubscribe = window.projection.ipc.onEvent(handler)
     return unsubscribe
@@ -124,6 +119,14 @@ export const Cluster: React.FC<ClusterProps> = ({ visible }) => {
     return unsubscribe
   }, [])
 
+  // The cluster is a video plane below the UI (compositor plane on Linux, NSView on mac).
+  useEffect(() => {
+    document.documentElement.classList.toggle('show-cluster', showCluster)
+    return () => {
+      if (showCluster) document.documentElement.classList.remove('show-cluster')
+    }
+  }, [showCluster])
+
   return (
     <Box
       ref={rootRef}
@@ -136,12 +139,12 @@ export const Cluster: React.FC<ClusterProps> = ({ visible }) => {
         display: 'flex',
         justifyContent: 'stretch',
         alignItems: 'stretch',
-        backgroundColor: theme.palette.background.default,
+        backgroundColor: 'transparent',
         visibility: showCluster ? 'visible' : 'hidden',
         opacity: showCluster ? 1 : 0,
-        pointerEvents: showCluster ? 'auto' : 'none',
+        pointerEvents: 'none',
         transition: 'opacity 220ms ease',
-        zIndex: showCluster ? 5 : -1
+        zIndex: showCluster ? 0 : -1
       }}
     >
       {!clusterStreamActive && showCluster && (

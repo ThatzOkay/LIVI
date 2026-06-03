@@ -106,8 +106,7 @@ export class ProjectionAudio {
   private _mic: Microphone | null = null
   private currentMicDecodeType: number | null = null
 
-  // Visualizer / FFT toggle
-  private visualizerEnabled = false
+  private visualizerWindows = new Set<number>()
 
   constructor(
     private readonly getConfig: () => Config,
@@ -116,8 +115,14 @@ export class ProjectionAudio {
     private readonly sendMicPcm: SendMicPcm
   ) {}
 
-  public setVisualizerEnabled(enabled: boolean) {
-    this.visualizerEnabled = !!enabled
+  public setVisualizerEnabled(enabled: boolean, sourceId = -1) {
+    if (enabled) this.visualizerWindows.add(sourceId)
+    else this.visualizerWindows.delete(sourceId)
+  }
+
+  // True while any window wants the FFT chunks
+  public get visualizerEnabled(): boolean {
+    return this.visualizerWindows.size > 0
   }
 
   private emitAttention(
@@ -395,7 +400,7 @@ export class ProjectionAudio {
       player.write(pcm)
 
       // Mono only for FFT visualization (optional)
-      if (this.visualizerEnabled && meta && msg.data) {
+      if (this.visualizerWindows.size > 0 && meta && msg.data) {
         const inSampleRate = meta.frequency ?? 48000
         const inChannels = meta.channel ?? 2
 

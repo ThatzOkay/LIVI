@@ -35,12 +35,17 @@
               width: 75px;
             }
 
-            /* Compositor mode */
-            html.compositor.show-video,
-            html.compositor.show-video body,
-            html.compositor.show-video #root,
-            html.compositor.show-video #main,
-            html.compositor.show-video #videoContainer {
+            /* Video underlay (compositor on Linux, NSView on mac) */
+            html.show-video,
+            html.show-video body,
+            html.show-video #root,
+            html.show-video #main,
+            html.show-video #videoContainer,
+            html.show-cluster,
+            html.show-cluster body,
+            html.show-cluster #root,
+            html.show-cluster #main,
+            html.show-cluster #videoContainer {
               background-color: transparent;
             }
     </style>

@@ -32,7 +32,8 @@ describe('audio ipc', () => {
     registerAudioIpc(host)
     onHandlers.get('projection-set-visualizer-enabled')!(null, 1)
     onHandlers.get('projection-set-visualizer-enabled')!(null, 0)
-    expect(host.setAudioVisualizerEnabled).toHaveBeenCalledWith(true)
-    expect(host.setAudioVisualizerEnabled).toHaveBeenCalledWith(false)
+    // No event sender in this test, so the per-window id is undefined
+    expect(host.setAudioVisualizerEnabled).toHaveBeenCalledWith(true, undefined)
+    expect(host.setAudioVisualizerEnabled).toHaveBeenCalledWith(false, undefined)
   })
 })

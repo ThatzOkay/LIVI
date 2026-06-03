@@ -4,6 +4,7 @@ import { useEffect, useRef } from 'react'
 import { MemoryRouter, Route, Routes, useLocation } from 'react-router'
 import { ROUTES } from '../../constants'
 import type { BindKey } from '../../hooks/keysControl/types'
+import { useFftPcm } from '../../hooks/useFftPcm'
 import { useLiviStore } from '../../store/store'
 import { broadcastMediaKey } from '../../utils/broadcastMediaKey'
 import { AppLayout } from '../layouts/AppLayout'
@@ -82,6 +83,8 @@ const SecondaryShellInner = ({ role, hasCluster }: InnerProps) => {
   const mainRef = useRef<HTMLDivElement | null>(null)
   const { pathname } = useLocation()
   const settings = useLiviStore((s) => s.settings)
+
+  useFftPcm()
 
   // Receive media-key broadcasts from main so this window's Media UI also flashes.
   useEffect(() => {

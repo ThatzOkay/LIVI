@@ -77,6 +77,7 @@ describe('bootstrapCompositor', () => {
     expect(argv[1]).toContain('--ozone-platform=wayland')
     expect(opts.detached).toBe(true)
     expect(opts.env.LIVI_UI_APP_ID).toBe('livi')
+    expect(opts.env.LIVI_SCREENS).toBe('main,dash,aux')
     expect(opts.env.APPIMAGE).toBeUndefined()
   })
 })

@@ -87,12 +87,11 @@ export const Media = ({ forceHydrate = false }: MediaProps = {}) => {
     setShowFft((v) => !v)
   }, [])
 
-  // Enable visualizer only when FFT is visible (and streaming)
+  // Enable visualizer only when FFT is visible
   useEffect(() => {
-    const enabled = !!showFft && !!isStreaming
-    window.projection?.ipc?.setVisualizerEnabled?.(enabled)
+    window.projection?.ipc?.setVisualizerEnabled?.(!!showFft)
     return () => window.projection?.ipc?.setVisualizerEnabled?.(false)
-  }, [showFft, isStreaming])
+  }, [showFft])
 
   // Per-button focus
   const [focus, setFocus] = useState<{ play: boolean; next: boolean; prev: boolean }>({

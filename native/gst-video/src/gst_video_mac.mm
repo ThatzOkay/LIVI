@@ -60,7 +60,7 @@ extern "C" guintptr livi_attach_view(guintptr parent, void** outView) {
   [clip setWantsLayer:YES];
   clip.layer.backgroundColor = CGColorGetConstantColor(kCGColorBlack);
   clip.layer.masksToBounds = YES;
-  [p addSubview:clip];
+  [p addSubview:clip positioned:NSWindowBelow relativeTo:nil];
 
   NSView* gl = [[NSView alloc] initWithFrame:[clip bounds]];
   [gl setWantsLayer:YES];

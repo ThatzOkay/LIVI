@@ -35,6 +35,7 @@ export function createMainWindow(runtimeState: runtimeStateProps, services: Serv
   const { projectionService } = services
   const isMac = isMacPlatform()
   const compositorMode = process.env.LIVI_COMPOSITOR === '1'
+  const transparentWindow = compositorMode || isMac
 
   const savedBounds = readMainBounds(runtimeState)
 
@@ -50,7 +51,7 @@ export function createMainWindow(runtimeState: runtimeStateProps, services: Serv
     kiosk: false,
     autoHideMenuBar: true,
     transparent: compositorMode,
-    backgroundColor: compositorMode ? '#00000000' : '#000',
+    backgroundColor: transparentWindow ? '#00000000' : '#000',
     fullscreenable: true,
     simpleFullscreen: false,
     webPreferences: {

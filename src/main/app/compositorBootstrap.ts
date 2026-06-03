@@ -1,6 +1,7 @@
 import { spawn } from 'node:child_process'
 import { existsSync } from 'node:fs'
 import { join } from 'node:path'
+import { loadConfig } from '@main/config/loadConfig'
 
 // Linux windowed (GNOME/labwc): host the UI plus the GStreamer video plane in
 // the nested wlroots compositor so they composite into one window, zero-copy :)
@@ -21,15 +22,27 @@ export function bootstrapCompositor(): boolean {
   const inner =
     `LIVI_COMPOSITOR=1 LD_LIBRARY_PATH='${hostLd}' ` + `'${appImage}' --ozone-platform=wayland`
 
-  // Control socket the host uses to push the AA video content region to the
-  // compositor (which crops the video plane zero-copy)
+  // Control socket: the host drives screen outputs + video placement/crop/visibility over this
   const runtimeDir = process.env.XDG_RUNTIME_DIR || '/tmp'
   const ctrlSocket = join(runtimeDir, 'livi-compositor.ctrl')
 
+  let outputSize: string | undefined
+  try {
+    const cfg = loadConfig()
+    const ow = Math.round(Number(cfg.width))
+    const oh = Math.round(Number(cfg.height))
+    if (ow > 0 && oh > 0) outputSize = `${ow}x${oh}`
+  } catch {
+    // fall back to the compositor's built-in default
+  }
+
+  // Known screen roles; the host opens/closes each output on demand via the control socket
   const env: NodeJS.ProcessEnv = {
     ...process.env,
     LIVI_UI_APP_ID: 'livi',
-    LIVI_COMPOSITOR_CTRL: ctrlSocket
+    LIVI_COMPOSITOR_CTRL: ctrlSocket,
+    LIVI_SCREENS: 'main,dash,aux',
+    ...(outputSize ? { LIVI_OUTPUT_SIZE: outputSize } : {})
   }
   delete env.APPIMAGE
   delete env.APPDIR
