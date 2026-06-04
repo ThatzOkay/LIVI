@@ -1,9 +1,9 @@
 [wrap-git]
 url = https://gitlab.freedesktop.org/wlroots/wlroots.git
 revision = 0.20
-# LIVI: expose host-output control (fullscreen now; move/resize next) so the nested
-# compositor can drive its host windows for app-kiosk + our own decorations.
-diff_files = wlroots-livi.patch
+# wlroots-livi.patch: expose host-output fullscreen control for app-kiosk.
+# wlroots-livi-touch.patch: multi-output touch in the wayland backend (upstream pending).
+diff_files = wlroots-livi.patch, wlroots-livi-touch.patch
 
 [provide]
 dependency_names = wlroots-0.20
