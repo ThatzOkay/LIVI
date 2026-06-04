@@ -155,6 +155,8 @@ export class Session extends EventEmitter {
   private _phoneCodecLogged = false
   private _clusterCodecByIndex: VideoCodec[] = []
   private _clusterCodec: VideoCodec | null = null
+  private _mainFrameSeen = false
+  private _clusterFocusPending = false
 
   constructor(
     private readonly _sock: net.Socket,
@@ -536,7 +538,15 @@ export class Session extends EventEmitter {
       CH.VIDEO
     )
 
-    this._video.on('frame', (buf: Buffer, ts: bigint) => this.emit('video-frame', buf, ts))
+    this._video.on('frame', (buf: Buffer, ts: bigint) => {
+      // Emit first so the main plane is claimed in the compositor, then release any
+      // cluster stream request that was held back waiting for main to come up.
+      this.emit('video-frame', buf, ts)
+      if (!this._mainFrameSeen) {
+        this._mainFrameSeen = true
+        if (this._clusterFocusPending) this._requestClusterStream()
+      }
+    })
 
     // Exit/Home on AA display — keep session alive so phone can re-request focus
     this._video.on('host-ui-requested', () => this.emit('host-ui-requested'))
@@ -890,10 +900,18 @@ export class Session extends EventEmitter {
   }
 
   // Tell the phone we have PROJECTED focus on the cluster channel. Same
-  // shape as main: a single VideoFocusIndication. Repeated calls are
-  // idempotent and don't interrupt the running stream.
+  // shape as main: a single VideoFocusIndication.
   requestClusterKeyframe(): void {
-    if (this._state !== State.RUNNING) return
+    this._requestClusterStream()
+  }
+
+  private _requestClusterStream(): void {
+    if (this._state !== State.RUNNING || !this._mainFrameSeen) {
+      this._clusterFocusPending = true
+      if (DEBUG) console.log('[Session] cluster stream request held until first main frame')
+      return
+    }
+    this._clusterFocusPending = false
     this._sendEncrypted(
       CH.CLUSTER_VIDEO,
       FRAME_FLAGS.ENC_SIGNAL,
@@ -1078,28 +1096,27 @@ export class Session extends EventEmitter {
       )
     }
 
-    if (channelId === CH.VIDEO || channelId === CH.CLUSTER_VIDEO) {
+    if (channelId === CH.VIDEO) {
       // VideoFocusIndication(PROJECTED, unsolicited=false) keyframe-request
       this._sendEncrypted(
-        channelId,
+        CH.VIDEO,
         FRAME_FLAGS.ENC_SIGNAL,
         AV_MSG.VIDEO_FOCUS_INDICATION,
         Buffer.from([0x08, 0x01])
       )
-      if (DEBUG) {
-        const label = channelId === CH.CLUSTER_VIDEO ? 'cluster' : 'main'
-        console.log(`[Session] VideoFocusIndication ${label} (PROJECTED, unsolicited=false) sent`)
-      }
+      if (DEBUG)
+        console.log('[Session] VideoFocusIndication main (PROJECTED, unsolicited=false) sent')
 
-      if (channelId === CH.VIDEO) {
-        // No AVChannelStartIndication — phone sends START_INDICATION when ready
-        this._transition(State.RUNNING)
-        this.emit('connected')
-        if (DEBUG)
-          console.log(
-            `[Session] Video channel ready — waiting for ${this._videoCodec ?? 'h264'} frames from phone`
-          )
-      }
+      // No AVChannelStartIndication — phone sends START_INDICATION when ready
+      this._transition(State.RUNNING)
+      this.emit('connected')
+      if (DEBUG)
+        console.log(
+          `[Session] Video channel ready — waiting for ${this._videoCodec ?? 'h264'} frames from phone`
+        )
+    } else if (channelId === CH.CLUSTER_VIDEO) {
+      // Hold the cluster stream request until the first main frame so the main plane is claimed first
+      this._requestClusterStream()
     }
   }
 

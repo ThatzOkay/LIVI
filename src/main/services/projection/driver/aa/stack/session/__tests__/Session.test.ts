@@ -202,12 +202,22 @@ describe('Session — outbound input API gated by state', () => {
     )
   })
 
-  test('requestClusterKeyframe emits a VIDEO_FOCUS_INDICATION on the cluster channel', () => {
+  test('requestClusterKeyframe holds the cluster focus until the first main frame', () => {
     const { session } = makeSession()
     forceRunning(session)
     const sent = captureEncrypted(session)
     session.requestClusterKeyframe()
+    expect(sent).not.toHaveBeenCalled()
+    expect((session as unknown as { _clusterFocusPending: boolean })._clusterFocusPending).toBe(
+      true
+    )
+    ;(session as unknown as { _mainFrameSeen: boolean })._mainFrameSeen = true
+    session.requestClusterKeyframe()
     expect(sent.mock.calls[0][0]).toBe(CH.CLUSTER_VIDEO)
+    expect(sent.mock.calls[0][2]).toBe(AV_MSG.VIDEO_FOCUS_INDICATION)
+    expect((session as unknown as { _clusterFocusPending: boolean })._clusterFocusPending).toBe(
+      false
+    )
   })
 })
 
@@ -719,7 +729,7 @@ describe('Session._handleAVSetupRequest', () => {
     expect((session as unknown as { _state: number })._state).toBe(6) // RUNNING
   })
 
-  test('cluster channel selects + emits cluster-video-codec', () => {
+  test('cluster channel selects + emits cluster-video-codec, holds focus until main frame', () => {
     const { session, sent } = setupSession()
     ;(session as unknown as { _clusterCodecByIndex: string[] })._clusterCodecByIndex = ['h264']
     const cb = jest.fn()
@@ -729,8 +739,16 @@ describe('Session._handleAVSetupRequest', () => {
       session as unknown as { _handleAVSetupRequest: (chId: number, p: Buffer) => void }
     )._handleAVSetupRequest(19 /* CH.CLUSTER_VIDEO */, Buffer.alloc(0))
     expect(cb).toHaveBeenCalledWith('h264')
-    // SETUP_RESPONSE + VIDEO_FOCUS_INDICATION on cluster
-    expect(sent.mock.calls.length).toBeGreaterThanOrEqual(2)
+    // SETUP_RESPONSE is sent, but the cluster VIDEO_FOCUS_INDICATION is held back until
+    // the first main frame so the main video plane is claimed first (no restart swap).
+    expect(sent).toHaveBeenCalled()
+    const focusSent = sent.mock.calls.some(
+      (c) => c[0] === CH.CLUSTER_VIDEO && c[2] === AV_MSG.VIDEO_FOCUS_INDICATION
+    )
+    expect(focusSent).toBe(false)
+    expect((session as unknown as { _clusterFocusPending: boolean })._clusterFocusPending).toBe(
+      true
+    )
   })
 
   test('audio channel forwards format to AudioChannel.handleSetupRequest', () => {
@@ -823,6 +841,36 @@ describe('Session.start() — channel wiring', () => {
     await session.start()
     expect(send).toHaveBeenCalled()
     spy.mockRestore()
+    session.close()
+    jest.clearAllTimers()
+    jest.useRealTimers()
+  })
+
+  test('first main frame releases a held cluster stream request', async () => {
+    jest.useFakeTimers()
+    const { session } = makeSession()
+    ;(session as unknown as { _sendVersionRequest: jest.Mock })._sendVersionRequest = jest.fn()
+    const loadProtosMod = jest.requireActual(
+      '../../proto/index'
+    ) as typeof import('../../proto/index')
+    const spy = jest.spyOn(loadProtosMod, 'loadProtos').mockResolvedValue({} as never)
+    patchProto(session)
+    await session.start()
+    spy.mockRestore()
+
+    forceRunning(session)
+    const sent = captureEncrypted(session)
+    // Cluster requested before any main frame → held back
+    session.requestClusterKeyframe()
+    expect(sent).not.toHaveBeenCalled()
+
+    // The first main frame claims the main plane, then releases the held cluster request
+    const video = (session as unknown as { _video: import('node:events').EventEmitter })._video
+    video.emit('frame', Buffer.from([0xaa]), 0n)
+    const clusterFocus = sent.mock.calls.find(
+      (c) => c[0] === CH.CLUSTER_VIDEO && c[2] === AV_MSG.VIDEO_FOCUS_INDICATION
+    )
+    expect(clusterFocus).toBeDefined()
     session.close()
     jest.clearAllTimers()
     jest.useRealTimers()
