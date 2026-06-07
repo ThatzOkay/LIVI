@@ -87,7 +87,7 @@ After this, the app will launch normally and future updates will work without ad
 
 ## Windows (x64)
 
-> [!IMPORTANT]
+> [!NOTE]
 > The Windows build is provided on a **best-effort basis**.
 > Windows is **not a primary target platform** of this project and receives limited testing.
 >
@@ -124,15 +124,19 @@ Make sure the following packages and tools are installed on your system before b
 - **libusb-1.0-0-dev** (required for `node-usb`)
 - **libudev-dev** (optional but recommended for USB detection on Linux)
 - **libgstreamer1.0-dev** + **libgstreamer-plugins-base1.0-dev** (required to build the `gst-video` addon)
+- **meson** (≥ 1.4), **ninja**, **pkg-config**, **bison** and **libegl-dev** / **libgles-dev** / **libgbm-dev** / **libffi-dev** / **libexpat1-dev** (Linux only: to build the embedded wlroots compositor)
 - **fuse** (required to run AppImages)
 
 On Debian/Ubuntu/Raspberry Pi OS, install everything with:
 
 ```bash
 sudo apt-get update
-sudo apt-get install -y git build-essential python3 python3-dev \
+sudo apt-get install -y git build-essential python3 python3-dev python3-pip \
+  pkg-config bison ninja-build \
   libusb-1.0-0-dev libudev-dev \
-  libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev
+  libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
+  libegl-dev libgles-dev libgbm-dev libffi-dev libexpat1-dev
+pip3 install --user --break-system-packages 'meson>=1.4'
 curl -fsSL https://deb.nodesource.com/setup_24.x | sudo -E bash -
 sudo apt-get install -y nodejs
 sudo corepack enable
