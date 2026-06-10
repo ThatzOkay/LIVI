@@ -154,6 +154,7 @@ export class ProjectionService {
   private gstVideoClusters = new Map<ClusterScreen, GstVideo>()
   private gstVideoClusterCodec: GstVideoCodec = 'h264'
   private clusterVisible = false
+  private clusterStreamActive: boolean | null = null
   private dongleFwVersion?: string
   private boxInfo?: unknown
   private hostDevList: DevListEntry[] = []
@@ -238,6 +239,7 @@ export class ProjectionService {
         this.gstVideoClusters.delete(screen)
       }
     }
+    this.syncClusterStreamFocus()
 
     // Seed AA's initial NIGHT_MODE
     if (next.appearanceMode !== prev?.appearanceMode) {
@@ -777,6 +779,18 @@ export class ProjectionService {
     return screen === 'main' ? this.clusterVisible : true
   }
 
+  // The phone only encodes/transfers the cluster stream while it is shown
+  private clusterStreamWanted(): boolean {
+    return clusterTargetScreens(this.config).some((s) => this.clusterPlaneVisible(s))
+  }
+
+  private syncClusterStreamFocus(): void {
+    const want = this.clusterStreamWanted()
+    if (want === this.clusterStreamActive) return
+    this.clusterStreamActive = want
+    this.aaDriver?.setClusterStreamActive(want)
+  }
+
   // The window a cluster plane belongs to: main → main window, dash/aux → ... window
   // mac embeds the video into this window's native view. Linux ignores the handle and
   // places the plane on the target compositor screen instead
@@ -810,6 +824,9 @@ export class ProjectionService {
   }
 
   private pushGstVideoCluster(nal: Buffer): void {
+    // Focus-stopped: ignore in-flight tail frames. Safe for the decoder because the
+    // resume (PROJECTED indication) always restarts the stream at a fresh keyframe.
+    if (this.clusterStreamActive === false) return
     // one plane per configured screen, all fed the same cluster stream
     for (const screen of clusterTargetScreens(this.config)) {
       let plane = this.gstVideoClusters.get(screen)
@@ -835,6 +852,7 @@ export class ProjectionService {
   public setClusterVisible(visible: boolean): void {
     this.clusterVisible = visible
     this.gstVideoClusters.get('main')?.setVisible(visible)
+    this.syncClusterStreamFocus()
   }
 
   // Cluster channel codec selection
@@ -1711,6 +1729,9 @@ export class ProjectionService {
               console.log(
                 `[ProjectionService] started in AA mode (${wiredDevice ? 'wired' : 'wireless'})`
               )
+              // Fresh AAStack defaults to an active cluster stream, re-apply visibility state
+              this.clusterStreamActive = null
+              this.syncClusterStreamFocus()
             } else {
               console.warn(
                 '[ProjectionService] aaDriver.start returned false — session not running'

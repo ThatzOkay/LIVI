@@ -168,6 +168,7 @@ export class Session extends EventEmitter {
   private _clusterCodec: VideoCodec | null = null
   private _mainFrameSeen = false
   private _clusterFocusPending = false
+  private _clusterStreamWanted = true
 
   constructor(
     private readonly _sock: net.Socket,
@@ -918,7 +919,21 @@ export class Session extends EventEmitter {
     this._requestClusterStream()
   }
 
+  // Visibility-gated cluster stream: NATIVE focus stops the phone-side encode and
+  // transfer entirely while no screen shows the cluster, PROJECTED resumes it.
+  setClusterStreamActive(active: boolean): void {
+    if (this._clusterStreamWanted === active) return
+    this._clusterStreamWanted = active
+    if (active) {
+      this._requestClusterStream()
+    } else {
+      this._clusterFocusPending = false
+      this._stopClusterStream()
+    }
+  }
+
   private _requestClusterStream(): void {
+    if (!this._clusterStreamWanted) return
     if (this._state !== State.RUNNING || !this._mainFrameSeen) {
       this._clusterFocusPending = true
       if (DEBUG) console.log('[Session] cluster stream request held until first main frame')
@@ -932,6 +947,17 @@ export class Session extends EventEmitter {
       Buffer.from([0x08, 0x01])
     )
     if (DEBUG) console.log('[Session] cluster video focus indication (PROJECTED) sent')
+  }
+
+  private _stopClusterStream(): void {
+    if (this._state !== State.RUNNING) return
+    this._sendEncrypted(
+      CH.CLUSTER_VIDEO,
+      FRAME_FLAGS.ENC_SIGNAL,
+      AV_MSG.VIDEO_FOCUS_INDICATION,
+      Buffer.from([0x08, 0x02])
+    )
+    if (DEBUG) console.log('[Session] cluster video focus indication (NATIVE) sent')
   }
 
   // HU-initiated shutdown via ByeByeRequest

@@ -19,6 +19,7 @@ class MockSession extends EventEmitter {
   sendMicPcm = jest.fn()
   requestVideoFocus = jest.fn()
   requestClusterKeyframe = jest.fn()
+  setClusterStreamActive = jest.fn()
   requestShutdown = jest.fn(async () => undefined)
   start = jest.fn(async () => undefined)
   close = jest.fn()

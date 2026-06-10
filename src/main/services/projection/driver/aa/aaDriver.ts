@@ -125,6 +125,11 @@ export class AaDriver extends EventEmitter implements IPhoneDriver {
     if (this._aaCfg) this._aaCfg.initialNightMode = value
   }
 
+  // Visibility-gated cluster stream: stops/resumes the phone-side cluster encode
+  setClusterStreamActive(active: boolean): void {
+    this._aa?.setClusterStreamActive(active)
+  }
+
   setWiredDevice(device: Device | null): void {
     this._wiredDevice = device
   }

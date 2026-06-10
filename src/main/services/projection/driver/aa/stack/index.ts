@@ -64,6 +64,7 @@ export interface AAStackConfig extends SessionConfig {
 export class AAStack extends EventEmitter {
   private readonly _server: TcpServer
   private _activeSession: Session | null = null
+  private _clusterStreamActive = true
 
   constructor(private readonly _cfg: AAStackConfig) {
     super()
@@ -77,6 +78,7 @@ export class AAStack extends EventEmitter {
 
   private _adoptSession(session: Session): void {
     this._activeSession = session
+    session.setClusterStreamActive(this._clusterStreamActive)
 
     session.on('video-frame', (buf: Buffer, ts: bigint) => this.emit('video-frame', buf, ts))
     session.on('cluster-video-frame', (buf: Buffer, ts: bigint) =>
@@ -235,6 +237,11 @@ export class AAStack extends EventEmitter {
 
   requestClusterKeyframe(): void {
     this._activeSession?.requestClusterKeyframe()
+  }
+
+  setClusterStreamActive(active: boolean): void {
+    this._clusterStreamActive = active
+    this._activeSession?.setClusterStreamActive(active)
   }
 
   async requestShutdown(): Promise<void> {
