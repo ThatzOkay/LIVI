@@ -34,7 +34,6 @@ sudo apt-get install -y \
   cage \
   seatd \
   wlr-randr \
-  uhubctl \
   pipewire wireplumber pipewire-pulse \
   gstreamer1.0-plugins-base \
   gstreamer1.0-plugins-good \
@@ -210,35 +209,13 @@ else
   echo "→ Kiosk autostart already present in ~/.bash_profile, leaving as is"
 fi
 
-# Phone attached across a cold boot stays charge-only; cycle USB ports once so it re-enumerates
-echo "→ Installing USB re-enumerate service"
-RESCAN_SCRIPT="/usr/local/bin/livi-usb-rescan.sh"
-sudo tee "$RESCAN_SCRIPT" >/dev/null <<'EOF'
-#!/usr/bin/env bash
-set -eu
-HUBS=$(uhubctl 2>/dev/null | sed -n 's/^Current status for hub \([^ ]*\).*/\1/p' | sort -u)
-[ -z "$HUBS" ] && exit 0
-# The Pi switches port power grouped: all hubs, serially, in this order. The slow libusb
-# waits double as settle time for the cascaded hub tree, do not parallelize or subset.
-for h in $HUBS; do uhubctl -l "$h" -a off >/dev/null 2>&1 || true; done
-sleep 2
-for h in $HUBS; do uhubctl -l "$h" -a on >/dev/null 2>&1 || true; done
-EOF
-sudo chmod 0755 "$RESCAN_SCRIPT"
-
-sudo tee /etc/systemd/system/livi-usb-rescan.service >/dev/null <<EOF
-[Unit]
-Description=LIVI USB re-enumerate (wake charge-latched phone at boot)
-
-[Service]
-Type=oneshot
-ExecStart=${RESCAN_SCRIPT}
-
-[Install]
-WantedBy=multi-user.target
-EOF
-sudo systemctl daemon-reload
-sudo systemctl enable livi-usb-rescan.service
+# Remove the USB re-enumerate service from earlier installs, it cycles port power and disrupts mouse/touch
+if [ -f /etc/systemd/system/livi-usb-rescan.service ]; then
+  echo "→ Removing legacy USB re-enumerate service"
+  sudo systemctl disable --now livi-usb-rescan.service 2>/dev/null || true
+  sudo rm -f /etc/systemd/system/livi-usb-rescan.service /usr/local/bin/livi-usb-rescan.sh
+  sudo systemctl daemon-reload
+fi
 
 echo ""
 echo "✅ LIVI Lite installation complete."

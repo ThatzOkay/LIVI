@@ -124,7 +124,7 @@ export async function probeAaCapable(
       // Interface still held exclusively after retries (a previous run's reset() can leave macOS
       // holding it). Force a clean re-enumeration so the hotplug path re-probes a fresh handle —
       // self-healing, no physical replug. Scoped to startup so it can't loop on the fresh device.
-      if (opts?.resetOnBusy && isExclusiveAccessError(err)) {
+      if (opts?.resetOnBusy && isInterfaceBusyError(err)) {
         console.log('[AOAP] interface still busy after retries — resetting device to recover')
         await settleWithin(device.reset(), 2000)
         return 0
@@ -152,10 +152,10 @@ async function startAccessory(device: Device): Promise<void> {
   await controlOut(device, REQ_START, 0, 0, Buffer.alloc(0))
 }
 
-// macOS reports a held interface as kIOReturnExclusiveAccess (0xe00002c5).
-function isExclusiveAccessError(err: unknown): boolean {
-  const msg = (err as Error)?.message ?? ''
-  return msg.includes('exclusive') || msg.includes('0xe00002c5')
+function isInterfaceBusyError(err: unknown): boolean {
+  const msg = ((err as Error)?.message ?? '').toLowerCase()
+  // macOS: kIOReturnExclusiveAccess (0xe00002c5). Linux: LIBUSB_ERROR_BUSY / "resource busy".
+  return msg.includes('exclusive') || msg.includes('0xe00002c5') || msg.includes('busy')
 }
 
 // Resolves once `p` settles or after `ms`, whichever comes first (never rejects).
@@ -177,7 +177,7 @@ async function claimInterfaceWithRetry(device: Device, ifaceNum: number): Promis
       await device.claimInterface(ifaceNum)
       return
     } catch (err) {
-      if (!isExclusiveAccessError(err) || attempt >= MAX_ATTEMPTS) throw err
+      if (!isInterfaceBusyError(err) || attempt >= MAX_ATTEMPTS) throw err
       console.log(`[AOAP] interface busy (exclusive access), retry ${attempt}/${MAX_ATTEMPTS - 1}`)
       await new Promise((r) => setTimeout(r, DELAY_MS))
     }
@@ -193,14 +193,25 @@ async function withClaimedInterface<T>(device: Device, fn: () => Promise<T>): Pr
     }
   }
   const ifaceNum = device.configuration?.interfaces[0]?.interfaceNumber ?? 0
-  await claimInterfaceWithRetry(device, ifaceNum)
+  let claimed = false
+  try {
+    await claimInterfaceWithRetry(device, ifaceNum)
+    claimed = true
+  } catch (err) {
+    // macOS keeps a kernel driver (MTP/ADB) on the normal-mode phone, so interface 0 stays busy.
+    // The AOAP handshake is EP0 control transfers and needs no interface claim, run it anyway.
+    if (!isInterfaceBusyError(err)) throw err
+    console.log('[AOAP] interface busy, running handshake on EP0 without a claim')
+  }
   try {
     return await fn()
   } finally {
-    try {
-      await device.releaseInterface(ifaceNum)
-    } catch {
-      /* device may have re-enumerated (after START) */
+    if (claimed) {
+      try {
+        await device.releaseInterface(ifaceNum)
+      } catch {
+        /* device may have re-enumerated (after START) */
+      }
     }
   }
 }

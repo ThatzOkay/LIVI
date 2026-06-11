@@ -98,6 +98,21 @@ describe('main index bootstrap', () => {
     expect(setupLifecycle).toHaveBeenCalledTimes(1)
   })
 
+  test('exits and does not boot services when the single-instance lock is held', async () => {
+    const { app } = require('electron')
+    ;(app.requestSingleInstanceLock as jest.Mock).mockReturnValueOnce(false)
+
+    const { ProjectionService } = require('@main/services/projection/services/ProjectionService')
+    const { TelemetrySocket } = require('@main/services/Socket')
+
+    require('@main/index')
+    await Promise.resolve()
+
+    expect(app.exit as jest.Mock).toHaveBeenCalledWith(0)
+    expect(ProjectionService).not.toHaveBeenCalled()
+    expect(TelemetrySocket).not.toHaveBeenCalled()
+  })
+
   test('runs the AA sudoers installer when aa=true on linux', async () => {
     const { app } = require('electron')
     ;(app.whenReady as jest.Mock).mockImplementation(

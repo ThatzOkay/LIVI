@@ -20,6 +20,7 @@ jest.mock('electron', () => {
       quit: jest.fn(),
       relaunch: jest.fn(),
       exit: jest.fn(),
+      requestSingleInstanceLock: jest.fn(() => true),
       whenReady: jest.fn(() => Promise.resolve()),
       on: jest.fn(),
       once: jest.fn(),

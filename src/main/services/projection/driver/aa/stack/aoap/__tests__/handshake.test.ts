@@ -173,12 +173,24 @@ describe('probeAaCapable', () => {
     expect(await probeAaCapable(d as unknown as Device)).toBe(0)
   })
 
-  test('resetOnBusy: persistent exclusive-access claim resets the device and returns 0', async () => {
+  test('a busy interface claim still reads the protocol over EP0', async () => {
     jest.useFakeTimers()
     const d = makeDevice({ claimError: new Error('kIOReturnExclusiveAccess (0xe00002c5)') })
     const p = probeAaCapable(d as unknown as Device, { resetOnBusy: true })
-    // claimInterfaceWithRetry sleeps 500ms between its 8 attempts; settleWithin then
-    // waits up to 2s for reset(). Flush all of it.
+    // claimInterfaceWithRetry sleeps 500ms between its 8 attempts before giving up the claim.
+    await jest.runAllTimersAsync()
+    const proto = await p
+    expect(proto).toBe(2)
+    expect(d.reset).not.toHaveBeenCalled()
+    expect(d.close).toHaveBeenCalled()
+    jest.useRealTimers()
+  })
+
+  test('resetOnBusy: a seized EP0 control transfer resets the device and returns 0', async () => {
+    jest.useFakeTimers()
+    const d = makeDevice({ ctrlError: new Error('kIOReturnExclusiveAccess (0xe00002c5)') })
+    const p = probeAaCapable(d as unknown as Device, { resetOnBusy: true })
+    // settleWithin waits up to 2s for reset(). Flush it.
     await jest.runAllTimersAsync()
     const proto = await p
     expect(proto).toBe(0)

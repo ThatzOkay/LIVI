@@ -25,11 +25,26 @@ import { createMainWindow, getMainWindow } from './window/createWindow'
 import { setupSecondaryWindows } from './window/secondaryWindows'
 
 // Outer launcher hands off to the nested compositor and exits
+let bootAllowed = true
 if (bootstrapCompositor()) {
   app.exit(0)
+  bootAllowed = false
+} else if (!app.requestSingleInstanceLock()) {
+  // Another LIVI already owns the telemetry port and the USB device, do not start a rival
+  app.exit(0)
+  bootAllowed = false
+} else {
+  app.on('second-instance', () => {
+    const win = getMainWindow()
+    if (!win) return
+    if (win.isMinimized()) win.restore()
+    win.show()
+    win.focus()
+  })
 }
 
 app.whenReady().then(async () => {
+  if (!bootAllowed) return
   const projectionService = new ProjectionService()
   const usbService = new USBService(projectionService)
   const telemetryStore = new TelemetryStore()

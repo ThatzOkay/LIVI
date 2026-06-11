@@ -103,6 +103,9 @@ function deriveInitialNightMode(mode: string | undefined): boolean | undefined {
   return undefined
 }
 
+// Retry backoff for a failed session bring-up (USB interface busy, phone locked).
+const START_RETRY_MS = 2000
+
 export class ProjectionService {
   private readonly drivers: ProjectionDriverManager
   private readonly arbiter: TransportArbiter
@@ -129,6 +132,7 @@ export class ProjectionService {
   private config: Config = DEFAULT_CONFIG as Config
   private pairTimeout: NodeJS.Timeout | null = null
   private frameInterval: NodeJS.Timeout | null = null
+  private startRetryTimer: NodeJS.Timeout | null = null
 
   private started = false
   private stopping = false
@@ -1726,6 +1730,7 @@ export class ProjectionService {
             const ok = await aaDriver.start(this.config)
             this.started = Boolean(ok)
             if (this.started) {
+              this.clearStartRetry()
               console.log(
                 `[ProjectionService] started in AA mode (${wiredDevice ? 'wired' : 'wireless'})`
               )
@@ -1734,14 +1739,16 @@ export class ProjectionService {
               this.syncClusterStreamFocus()
             } else {
               console.warn(
-                '[ProjectionService] aaDriver.start returned false — session not running'
+                '[ProjectionService] aaDriver.start returned false — session not running, retrying'
               )
               this.drivers.releaseAa()
+              this.scheduleStartRetry()
             }
           } catch (e) {
-            console.warn('[ProjectionService] AA start failed', e)
+            console.warn('[ProjectionService] AA start failed, retrying', e)
             this.started = false
             this.drivers.releaseAa()
+            this.scheduleStartRetry()
           }
           return
         }
@@ -1955,7 +1962,26 @@ export class ProjectionService {
     this.emitProjectionEvent({ type: 'navigation-reset', reason })
   }
 
+  // Bring-up can fail transiently (USB interface still busy, phone still locked). Keep retrying
+  // so a connection eventually establishes, the arbiter stops us once the phone is gone.
+  private scheduleStartRetry() {
+    if (this.shuttingDown || this.stopping) return
+    if (this.startRetryTimer) return
+    this.startRetryTimer = setTimeout(() => {
+      this.startRetryTimer = null
+      this.autoStartIfNeeded().catch(console.error)
+    }, START_RETRY_MS)
+  }
+
+  private clearStartRetry() {
+    if (this.startRetryTimer) {
+      clearTimeout(this.startRetryTimer)
+      this.startRetryTimer = null
+    }
+  }
+
   private clearTimeouts() {
+    this.clearStartRetry()
     if (this.pairTimeout) {
       clearTimeout(this.pairTimeout)
       this.pairTimeout = null

@@ -58,6 +58,9 @@ export class TelemetrySocket {
     this.httpServer = http.createServer()
     this.io = new Server(this.httpServer, { cors: { origin: '*' } })
     this.setupListeners()
+    this.httpServer.on('error', (err: NodeJS.ErrnoException) => {
+      console.error(`[TelemetrySocket] server error on port ${this.port}:`, err.message)
+    })
     this.httpServer.listen(this.port, () => {
       console.log(`[TelemetrySocket] Server listening on port ${this.port}`)
     })
