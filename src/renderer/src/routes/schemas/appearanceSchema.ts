@@ -38,37 +38,49 @@ export const appearanceSchema: SettingsNode<Config> = {
       type: 'color',
       label: 'Primary Color Dark',
       labelKey: 'settings.primaryColorDark',
-      path: 'primaryColorDark'
+      path: 'primaryColorDark',
+      displayValue: true,
+      page: { title: 'Primary Color Dark', labelTitle: 'settings.primaryColorDark' }
     },
     {
       type: 'color',
       label: 'Highlight Color Dark',
       labelKey: 'settings.highlightColorDark',
-      path: 'highlightColorDark'
+      path: 'highlightColorDark',
+      displayValue: true,
+      page: { title: 'Highlight Color Dark', labelTitle: 'settings.highlightColorDark' }
     },
     {
       type: 'color',
       label: 'Background Color Dark',
       labelKey: 'settings.backgroundColorDark',
-      path: 'backgroundColorDark'
+      path: 'backgroundColorDark',
+      displayValue: true,
+      page: { title: 'Background Color Dark', labelTitle: 'settings.backgroundColorDark' }
     },
     {
       type: 'color',
       label: 'Primary Color Light',
       labelKey: 'settings.primaryColorLight',
-      path: 'primaryColorLight'
+      path: 'primaryColorLight',
+      displayValue: true,
+      page: { title: 'Primary Color Light', labelTitle: 'settings.primaryColorLight' }
     },
     {
       type: 'color',
       label: 'Highlight Color Light',
       labelKey: 'settings.highlightColorLight',
-      path: 'highlightColorLight'
+      path: 'highlightColorLight',
+      displayValue: true,
+      page: { title: 'Highlight Color Light', labelTitle: 'settings.highlightColorLight' }
     },
     {
       type: 'color',
       label: 'Background Color Light',
       labelKey: 'settings.backgroundColorLight',
-      path: 'backgroundColorLight'
+      path: 'backgroundColorLight',
+      displayValue: true,
+      page: { title: 'Background Color Light', labelTitle: 'settings.backgroundColorLight' }
     },
     {
       type: 'route',

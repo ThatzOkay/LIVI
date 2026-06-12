@@ -1,12 +1,11 @@
-import RestartAltOutlinedIcon from '@mui/icons-material/RestartAltOutlined'
-import { IconButton, MenuItem, Select, Slider, Switch, TextField } from '@mui/material'
+import { MenuItem, Select, Slider, Switch, TextField } from '@mui/material'
 import { useLiviStore } from '@renderer/store/store'
-import { themeColors } from '@renderer/themeColors'
 import type { Config } from '@shared/types'
 import { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import { SettingsNode } from '../../../../routes'
 import type { SelectOption } from '../../../../routes/types'
+import { ColorPickerControl } from './colorPicker/ColorPickerControl'
 import { extractBtMac, withGhostOption } from './ghostOption'
 import NumberSpinner from './numberSpinner/numberSpinner'
 import { getCachedOptions, resolveOptions } from './selectOptionsCache'
@@ -22,25 +21,6 @@ type Props<T> = {
 const clampInt = (n: number, min: number, max: number, step = 1) => {
   const snapped = step > 1 ? min + Math.round((n - min) / step) * step : Math.round(n)
   return Math.min(max, Math.max(min, snapped))
-}
-
-const defaultColorForPath = (path?: string): string => {
-  switch (path) {
-    case 'primaryColorDark':
-      return themeColors.primaryColorDark
-    case 'primaryColorLight':
-      return themeColors.primaryColorLight
-    case 'highlightColorDark':
-      return themeColors.highlightColorDark
-    case 'highlightColorLight':
-      return themeColors.highlightColorLight
-    case 'backgroundColorDark':
-      return themeColors.dark
-    case 'backgroundColorLight':
-      return themeColors.light
-    default:
-      return themeColors.highlightColorDark
-  }
 }
 
 const marks = [
@@ -141,51 +121,8 @@ export const SettingsFieldControl = <T,>({
         />
       )
 
-    case 'color': {
-      const hasCustom = value != null && String(value).trim() !== ''
-      const color = hasCustom ? String(value) : defaultColorForPath(node.path)
-
-      return (
-        <div style={{ height: '100%', display: 'flex', alignItems: 'center', gap: 8 }}>
-          <TextField
-            type="color"
-            value={color}
-            onChange={(e) => onChange(e.target.value as T)}
-            variant="outlined"
-            sx={{
-              width: 72,
-              minWidth: 72,
-
-              '& .MuiInputBase-root': {
-                boxSizing: 'border-box',
-                height: 'auto',
-                minHeight: 0,
-                padding: '0.35em',
-                display: 'flex',
-                alignItems: 'center'
-              },
-
-              '& input[type="color"]': {
-                boxSizing: 'border-box',
-                width: '100%',
-                height: '1.6em',
-                padding: 0,
-                border: 0,
-                cursor: 'pointer'
-              }
-            }}
-          />
-
-          <IconButton
-            size="small"
-            disabled={!hasCustom}
-            onClick={() => onChange(null as unknown as T)}
-          >
-            <RestartAltOutlinedIcon fontSize="small" />
-          </IconButton>
-        </div>
-      )
-    }
+    case 'color':
+      return <ColorPickerControl node={node} value={value} onChange={(v) => onChange(v as T)} />
 
     default:
       return null

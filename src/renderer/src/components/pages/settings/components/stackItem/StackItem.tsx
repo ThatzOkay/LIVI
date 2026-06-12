@@ -6,6 +6,7 @@ import React, { useEffect, useState } from 'react'
 import { useTranslation } from 'react-i18next'
 import type { SelectNode } from '../../../../../routes/types'
 import { StackItemProps } from '../../type'
+import { defaultColorForPath } from '../colorPicker/colorUtils'
 import { findOptionForValue, withGhostOption } from '../ghostOption'
 import { getCachedOptions, resolveOptions } from '../selectOptionsCache'
 
@@ -189,7 +190,22 @@ export const StackItem = ({
       role={onClick ? 'button' : undefined}
     >
       {children}
-      {showValue && value != null && (
+      {showValue && node?.type === 'color' && (
+        <div
+          style={{
+            flex: 'none',
+            width: 'clamp(40px, 8svh, 56px)',
+            height: 'clamp(20px, 4svh, 28px)',
+            borderRadius: 6,
+            border: '1px solid rgba(128, 128, 128, 0.5)',
+            backgroundColor:
+              value != null && String(value).trim() !== ''
+                ? String(value)
+                : defaultColorForPath(node.path)
+          }}
+        />
+      )}
+      {showValue && node?.type !== 'color' && value != null && (
         <div style={{ whiteSpace: 'nowrap', fontSize: 'clamp(0.85rem, 2.0svh, 0.95rem)' }}>
           {displayValue}
         </div>

@@ -141,16 +141,18 @@ describe('SettingsFieldControl', () => {
         onChange={onChange}
       />
     )
-    expect(screen.getByTestId('textfield-color')).toHaveValue('#00ffff')
+    // Default color shows as hex, reset stays disabled until a custom color exists
+    expect(screen.getByText('#00FFFF')).toBeInTheDocument()
     expect(screen.getByTestId('icon-button')).toBeDisabled()
 
     rerender(
       <SettingsFieldControl
         node={{ type: 'color', label: 'Highlight', path: 'highlightColorDark' } as any}
-        value="#00ffff"
+        value="#ff0000"
         onChange={onChange}
       />
     )
+    expect(screen.getByText('#FF0000')).toBeInTheDocument()
     fireEvent.click(screen.getByTestId('icon-button'))
     expect(onChange).toHaveBeenCalledWith(null)
   })

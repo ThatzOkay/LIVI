@@ -25,7 +25,8 @@ jest.mock('electron', () => {
         },
         setWindowOpenHandler: jest.fn(),
         setZoomFactor: jest.fn(),
-        openDevTools: jest.fn()
+        openDevTools: jest.fn(),
+        on: jest.fn()
       },
       once: jest.fn(),
       on: jest.fn(),

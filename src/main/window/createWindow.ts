@@ -240,6 +240,10 @@ export function createMainWindow(runtimeState: runtimeStateProps, services: Serv
     })
   }
 
+  mainWindow.webContents.on('render-process-gone', (_e, details) => {
+    console.error(`[window] renderer gone: reason=${details.reason} exitCode=${details.exitCode}`)
+  })
+
   mainWindow.webContents.setWindowOpenHandler(({ url }) => {
     shell.openExternal(url)
     return { action: 'deny' }
