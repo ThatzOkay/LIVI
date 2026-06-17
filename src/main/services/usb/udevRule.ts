@@ -130,7 +130,7 @@ export async function checkAndInstallUdevRule(window: BrowserWindow): Promise<vo
     title: isUpgrade ? 'USB Permission Update' : 'USB Permission Required',
     message: isUpgrade
       ? 'LIVI needs to update its udev rule for USB device access.'
-      : 'LIVI needs permission to access the USB dongle.',
+      : 'LIVI needs permission to access USB devices.',
     detail: isUpgrade
       ? `The existing rule at ${RULE_FILE} is outdated (wired Android Auto needs additional phone vendor entries). It will be replaced.`
       : `A udev rule will be installed to ${RULE_FILE}.`,
@@ -141,23 +141,31 @@ export async function checkAndInstallUdevRule(window: BrowserWindow): Promise<vo
 
   if (response !== 0) return
 
-  try {
-    await installRule()
-    await dialog.showMessageBox(window, {
-      type: 'info',
-      title: 'Done',
-      message: 'udev rule installed successfully.',
-      buttons: ['OK']
-    })
-  } catch (err) {
-    console.error('[udevRule] Installation failed:', err)
-    const ruleContent = buildRuleContent()
-    await dialog.showMessageBox(window, {
-      type: 'error',
-      title: 'Installation Failed',
-      message: 'Could not install the udev rule.',
-      detail: `Run this manually:\n\nsudo tee ${RULE_FILE} <<'EOF'\n${ruleContent.trim()}\nEOF\nsudo udevadm control --reload-rules && sudo udevadm trigger`,
-      buttons: ['OK']
-    })
+  let installed = false
+  while (!installed) {
+    try {
+      await installRule()
+      installed = true
+    } catch (err) {
+      console.error('[udevRule] Installation failed:', err)
+      const { response: retry } = await dialog.showMessageBox(window, {
+        type: 'error',
+        title: 'Installation Failed',
+        message: 'Could not install the udev rule.',
+        detail:
+          'The authorization was cancelled or the password was wrong. This step is required for USB device access.',
+        buttons: ['Retry', 'Skip'],
+        defaultId: 0,
+        cancelId: 1
+      })
+      if (retry !== 0) return
+    }
   }
+
+  await dialog.showMessageBox(window, {
+    type: 'info',
+    title: 'Done',
+    message: 'udev rule installed successfully.',
+    buttons: ['OK']
+  })
 }
