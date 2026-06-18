@@ -746,4 +746,61 @@ describe('ProjectionAudio state controls', () => {
     expect(() => a.stopPlayerByKey('48000:2')).not.toThrow()
     expect(a.audioPlayers.size).toBe(0)
   })
+
+  describe('handleAudioData — music gain, ducking and ramps', () => {
+    function musicSubject() {
+      const a = createSubject()
+      const player = { write: vi.fn() }
+      a.getAudioOutputForStream = vi.fn(() => player)
+      a.getLogicalStreamKey = vi.fn(() => 'music')
+      a.mediaActive = true
+      return { a, player }
+    }
+
+    test('writes music PCM in steady state when not ducking', () => {
+      const { a, player } = musicSubject()
+      a.handleAudioData({ data: new Int16Array([100, -100]), decodeType: 1 })
+      expect(player.write).toHaveBeenCalledTimes(1)
+      expect(a.musicRampActive).toBe(false)
+    })
+
+    test('ducks music down while nav is active (starts a ramp)', () => {
+      const { a, player } = musicSubject()
+      a.navActive = true
+      a.handleAudioData({ data: new Int16Array([1000, -1000, 500, -500]), decodeType: 1 })
+      expect(a.musicRampActive).toBe(true)
+      expect(a.musicFade.target).toBe(0.2)
+      expect(player.write).toHaveBeenCalledTimes(1)
+    })
+
+    test('mutes music while gated by a pending ramp start', () => {
+      const { a, player } = musicSubject()
+      a.nextMusicRampStartAt = Date.now() + 10_000
+      a.handleAudioData({ data: new Int16Array([2000, -2000]), decodeType: 1 })
+      expect(a.musicGateMuted).toBe(true)
+      expect(Array.from(player.write.mock.calls[0][0] as Int16Array)).toEqual([0, 0])
+    })
+
+    test('ramps music up from zero after the gate releases', () => {
+      const { a } = musicSubject()
+      a.musicGateMuted = true
+      a.nextMusicRampStartAt = 0
+      a.handleAudioData({ data: new Int16Array([3000, -3000, 1500, -1500]), decodeType: 1 })
+      expect(a.musicGateMuted).toBe(false)
+      expect(a.musicRampActive).toBe(true)
+      expect(a.musicFade.current).toBeGreaterThanOrEqual(0)
+    })
+
+    test('restores music gain to 1 once nav releases past the hold window', () => {
+      const { a } = musicSubject()
+      // start ducked
+      a.navActive = true
+      a.handleAudioData({ data: new Int16Array([800, -800]), decodeType: 1 })
+      // nav released, hold window already elapsed → ramp back to 1
+      a.navActive = false
+      a.navHoldUntil = 0
+      a.handleAudioData({ data: new Int16Array([800, -800]), decodeType: 1 })
+      expect(a.musicFade.target).toBe(1)
+    })
+  })
 })

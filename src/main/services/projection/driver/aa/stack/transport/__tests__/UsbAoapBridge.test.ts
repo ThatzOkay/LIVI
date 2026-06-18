@@ -113,6 +113,8 @@ vi.mock('../../aoap/handshake', () => ({
   runAoapHandshake: (...a: unknown[]) => runAoapHandshakeMock(...a)
 }))
 
+import { usb } from 'usb'
+import type { Mock } from 'vitest'
 import { UsbAoapBridge } from '../UsbAoapBridge'
 
 type Device = USBDevice
@@ -424,5 +426,74 @@ describe('UsbAoapBridge — pump edge cases', () => {
     await flush()
     expect(onErr).toHaveBeenCalled()
     expect(sock.destroy).toHaveBeenCalled()
+  })
+})
+
+describe('UsbAoapBridge — non-accessory boot (mode switch + re-enumerate)', () => {
+  const ACCESSORY_PID = 0x2d00
+
+  // Fire the hotplug 'connect' that waitForAccessoryAttach is listening for, with an
+  // accessory-mode device, so the parked `await reenumerated` resolves.
+  async function fireAccessoryConnect(): Promise<void> {
+    for (let i = 0; i < 50 && (usb.addEventListener as Mock).mock.calls.length === 0; i++) {
+      await flush()
+    }
+    const onConnect = (usb.addEventListener as Mock).mock.calls.at(-1)![1] as (e: {
+      device: unknown
+    }) => void
+    const acc = new MockDevice()
+    acc.productId = ACCESSORY_PID
+    onConnect({ device: acc })
+  }
+
+  test('opens the normal-mode device, runs the AOAP handshake, then opens the accessory', async () => {
+    ;(usb.addEventListener as Mock).mockClear()
+    isAccessoryModeMock.mockReturnValue(false)
+    const dev = new MockDevice()
+    createServer.mockImplementationOnce(() => new MockServer())
+    const bridge = new UsbAoapBridge(dev as unknown as Device)
+    const ready = vi.fn()
+    bridge.on('ready', ready)
+
+    const startP = bridge.start()
+    await fireAccessoryConnect()
+    await startP
+
+    expect(dev.open).toHaveBeenCalled()
+    expect(runAoapHandshakeMock).toHaveBeenCalled()
+    expect(dev.close).toHaveBeenCalled() // normal-mode device is closed after the handshake
+    expect(ready).toHaveBeenCalled()
+  })
+
+  test('renderer-handshake path skips opening the normal-mode device in this process', async () => {
+    ;(usb.addEventListener as Mock).mockClear()
+    isAccessoryModeMock.mockReturnValue(false)
+    const dev = new MockDevice()
+    const rendererHandshake = vi.fn(async () => 1)
+    createServer.mockImplementationOnce(() => new MockServer())
+    const bridge = new UsbAoapBridge(dev as unknown as Device, undefined, rendererHandshake)
+
+    const startP = bridge.start()
+    await fireAccessoryConnect()
+    await startP
+
+    expect(rendererHandshake).toHaveBeenCalledWith(dev.vendorId, dev.productId)
+    expect(runAoapHandshakeMock).not.toHaveBeenCalled()
+    expect(dev.open).not.toHaveBeenCalled()
+  })
+
+  test('invokes the onWillReenumerate hook with a timeout budget', async () => {
+    ;(usb.addEventListener as Mock).mockClear()
+    isAccessoryModeMock.mockReturnValue(false)
+    const dev = new MockDevice()
+    const onWillReenumerate = vi.fn()
+    createServer.mockImplementationOnce(() => new MockServer())
+    const bridge = new UsbAoapBridge(dev as unknown as Device, onWillReenumerate)
+
+    const startP = bridge.start()
+    await fireAccessoryConnect()
+    await startP
+
+    expect(onWillReenumerate).toHaveBeenCalledWith(expect.any(Number))
   })
 })

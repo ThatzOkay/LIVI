@@ -1,4 +1,19 @@
-import { parseDeviceMonitorOutput } from '../AudioDeviceEnumerator'
+import { EventEmitter } from 'node:events'
+import {
+  listAudioDevices,
+  parseDeviceMonitorOutput,
+  startAudioDeviceMonitor
+} from '../AudioDeviceEnumerator'
+
+const { resolveGStreamerRoot, resolveBinary, gstEnv } = vi.hoisted(() => ({
+  resolveGStreamerRoot: vi.fn(),
+  resolveBinary: vi.fn(),
+  gstEnv: vi.fn(() => ({}))
+}))
+vi.mock('../gstreamer', () => ({ resolveGStreamerRoot, resolveBinary, gstEnv }))
+
+const { execFile, spawn } = vi.hoisted(() => ({ execFile: vi.fn(), spawn: vi.fn() }))
+vi.mock('child_process', () => ({ execFile, spawn }))
 
 // Real-shape sample from `gst-device-monitor-1.0 Audio/Sink` on a Pi running
 // PipeWire. Trimmed but structurally faithful.
@@ -263,5 +278,135 @@ Device found:
 `
     expect(parseDeviceMonitorOutput(otherKind, 'sink')).toEqual([])
     expect(parseDeviceMonitorOutput(otherKind, 'source')).toEqual([])
+  })
+})
+
+const SINK_SAMPLE = `Device found:
+
+	name  : Speakers
+	class : Audio/Sink
+	properties:
+		device.name = alsa_output.builtin
+		device.description = Speakers
+`
+
+describe('listAudioDevices', () => {
+  beforeEach(() => {
+    resolveGStreamerRoot.mockReset()
+    resolveBinary.mockReset()
+    execFile.mockReset()
+    resolveGStreamerRoot.mockReturnValue('/gst')
+    resolveBinary.mockReturnValue('/gst/bin/gst-device-monitor-1.0')
+  })
+
+  test('returns the parsed devices on success', async () => {
+    execFile.mockImplementation((_bin, _args, _opts, cb) => cb(null, SINK_SAMPLE))
+
+    const devices = await listAudioDevices('sink')
+    expect(devices).toEqual([{ id: 'alsa_output.builtin', name: 'Speakers', isDefault: false }])
+  })
+
+  test('passes the kind-specific class filter to the monitor', async () => {
+    execFile.mockImplementation((_bin, _args, _opts, cb) => cb(null, ''))
+
+    await listAudioDevices('source')
+    expect(execFile).toHaveBeenCalledWith(
+      '/gst/bin/gst-device-monitor-1.0',
+      ['Audio/Source'],
+      expect.any(Object),
+      expect.any(Function)
+    )
+  })
+
+  test('resolves to an empty list when the monitor process errors', async () => {
+    execFile.mockImplementation((_bin, _args, _opts, cb) => cb(new Error('spawn failed'), ''))
+
+    await expect(listAudioDevices('sink')).resolves.toEqual([])
+  })
+
+  test('returns an empty list when the GStreamer bundle is missing', async () => {
+    resolveBinary.mockReturnValue(null)
+
+    await expect(listAudioDevices('sink')).resolves.toEqual([])
+    expect(execFile).not.toHaveBeenCalled()
+  })
+})
+
+function makeFakeChild() {
+  const stdout = new EventEmitter() as EventEmitter & { setEncoding: (e: string) => void }
+  stdout.setEncoding = vi.fn()
+  const child = new EventEmitter() as EventEmitter & {
+    stdout: typeof stdout
+    kill: () => void
+    killed: boolean
+  }
+  child.stdout = stdout
+  child.kill = vi.fn()
+  child.killed = false
+  return child
+}
+
+describe('startAudioDeviceMonitor', () => {
+  beforeEach(() => {
+    resolveGStreamerRoot.mockReset()
+    resolveBinary.mockReset()
+    spawn.mockReset()
+    resolveGStreamerRoot.mockReturnValue('/gst')
+    resolveBinary.mockReturnValue('/gst/bin/gst-device-monitor-1.0')
+    vi.useFakeTimers()
+  })
+
+  afterEach(() => {
+    vi.useRealTimers()
+  })
+
+  test('fires a debounced onChange on a topology event', () => {
+    const child = makeFakeChild()
+    spawn.mockReturnValue(child)
+    const onChange = vi.fn()
+
+    const handle = startAudioDeviceMonitor(onChange)
+    child.stdout.emit('data', 'Device alsa_output.builtin :\n')
+
+    expect(onChange).not.toHaveBeenCalled()
+    vi.advanceTimersByTime(250)
+    expect(onChange).toHaveBeenCalledTimes(1)
+
+    handle.stop()
+    expect(child.kill).toHaveBeenCalled()
+  })
+
+  test('ignores non-topology output lines', () => {
+    const child = makeFakeChild()
+    spawn.mockReturnValue(child)
+    const onChange = vi.fn()
+
+    startAudioDeviceMonitor(onChange)
+    child.stdout.emit('data', 'Probing devices...\nsome noise\n')
+    vi.advanceTimersByTime(250)
+
+    expect(onChange).not.toHaveBeenCalled()
+  })
+
+  test('restarts the monitor after the child exits', () => {
+    const first = makeFakeChild()
+    const second = makeFakeChild()
+    let n = 0
+    spawn.mockImplementation(() => (++n === 1 ? first : second))
+
+    startAudioDeviceMonitor(vi.fn())
+    expect(spawn).toHaveBeenCalledTimes(1)
+
+    first.emit('exit')
+    vi.advanceTimersByTime(2000)
+    expect(spawn).toHaveBeenCalledTimes(2)
+  })
+
+  test('returns a no-op handle when the GStreamer bundle is missing', () => {
+    resolveBinary.mockReturnValue(null)
+
+    const handle = startAudioDeviceMonitor(vi.fn())
+    expect(() => handle.stop()).not.toThrow()
+    expect(spawn).not.toHaveBeenCalled()
   })
 })

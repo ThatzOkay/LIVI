@@ -3,7 +3,11 @@ import { BrowserWindow, dialog } from 'electron'
 import fs from 'fs'
 import os from 'os'
 import type { Mock } from 'vitest'
-import { checkAndInstallUdevRule, udevRuleExists } from '../udevRule'
+import {
+  checkAndInstallUdevRule,
+  phoneVendorIdsFromUdevTemplate,
+  udevRuleExists
+} from '../udevRule'
 
 vi.mock('electron', () => ({
   BrowserWindow: vi.fn(),
@@ -155,6 +159,21 @@ describe('udevRule', () => {
       expect(mockSpawn).not.toHaveBeenCalled()
     })
 
+    test('prefers the packaged template path when resourcesPath is set', async () => {
+      const template = realFs.readFileSync(
+        `${process.cwd()}/assets/linux/99-LIVI.rules.template`,
+        'utf8'
+      )
+      mockReadFileSync.mockReturnValue(template)
+      Object.defineProperty(process, 'resourcesPath', {
+        value: '/opt/livi/resources',
+        configurable: true
+      })
+      await checkAndInstallUdevRule(mockWindow)
+      expect(mockExistsSync).toHaveBeenCalledWith('/opt/livi/resources/99-LIVI.rules.template')
+      Reflect.deleteProperty(process, 'resourcesPath')
+    })
+
     test('does nothing when pkexec is not available', async () => {
       mockExecFileSync.mockImplementation(function () {
         throw new Error('not found')
@@ -277,5 +296,15 @@ describe('udevRule', () => {
 
     expect(script).not.toContain('__USERNAME__')
     expect(script).toContain(rendered)
+  })
+
+  describe('phoneVendorIdsFromUdevTemplate', () => {
+    test('parses the phone vendor allowlist from the template and caches it', () => {
+      const ids = phoneVendorIdsFromUdevTemplate()
+      expect(ids).toBeInstanceOf(Set)
+      expect(ids!.size).toBeGreaterThan(0)
+      expect(ids!.has(0x1314)).toBe(false)
+      expect(phoneVendorIdsFromUdevTemplate()).toBe(ids)
+    })
   })
 })

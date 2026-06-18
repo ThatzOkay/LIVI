@@ -6,6 +6,7 @@ import {
   applyAspectRatioWindowed,
   applyWindowedContentSize,
   attachKioskStateSync,
+  attachResizeReflow,
   currentKiosk,
   persistKioskAndBroadcast,
   restoreKioskAfterWmExit,
@@ -539,6 +540,102 @@ describe('window utils', () => {
       mockedGetAllDisplays.mockReturnValue([])
       const b = { x: 4000, y: 4000, width: 800, height: 480 }
       expect(sanitizeBounds(b)).toBe(b)
+    })
+  })
+
+  describe('attachResizeReflow', () => {
+    const mockedGetMainWindow = getMainWindow as Mock
+
+    function fakeWin() {
+      const handlers: Record<string, () => void> = {}
+      return {
+        handlers,
+        on: vi.fn((ev: string, cb: () => void) => {
+          handlers[ev] = cb
+        }),
+        isDestroyed: vi.fn(() => false),
+        isFullScreen: vi.fn(() => false),
+        getContentSize: vi.fn(() => [800, 480]),
+        setContentSize: vi.fn()
+      }
+    }
+
+    afterEach(() => {
+      delete process.env.LIVI_COMPOSITOR
+    })
+
+    test('is a no-op outside the compositor', () => {
+      delete process.env.LIVI_COMPOSITOR
+      const win = fakeWin()
+      mockedGetMainWindow.mockReturnValue(win)
+      attachResizeReflow()
+      expect(win.on).not.toHaveBeenCalled()
+    })
+
+    test('is a no-op when there is no main window', () => {
+      process.env.LIVI_COMPOSITOR = '1'
+      mockedGetMainWindow.mockReturnValue(null)
+      expect(() => attachResizeReflow()).not.toThrow()
+    })
+
+    test('nudges the content size after a resize settles, then restores it', () => {
+      vi.useFakeTimers()
+      process.env.LIVI_COMPOSITOR = '1'
+      const win = fakeWin()
+      mockedGetMainWindow.mockReturnValue(win)
+      attachResizeReflow()
+
+      win.handlers.resize()
+      vi.advanceTimersByTime(200) // debounce window → nudge
+      expect(win.setContentSize).toHaveBeenCalledWith(800, 481)
+
+      vi.advanceTimersByTime(60) // restore
+      expect(win.setContentSize).toHaveBeenLastCalledWith(800, 480)
+
+      vi.advanceTimersByTime(60) // clears the nudging flag
+      vi.useRealTimers()
+    })
+
+    test('debounces a burst of resizes into a single nudge', () => {
+      vi.useFakeTimers()
+      process.env.LIVI_COMPOSITOR = '1'
+      const win = fakeWin()
+      mockedGetMainWindow.mockReturnValue(win)
+      attachResizeReflow()
+
+      win.handlers.resize()
+      win.handlers.resize()
+      win.handlers.resize()
+      vi.advanceTimersByTime(200)
+
+      // only the single +1 nudge has fired so far
+      expect(win.setContentSize).toHaveBeenCalledTimes(1)
+      vi.useRealTimers()
+    })
+
+    test('skips the nudge when the window is fullscreen when the timer fires', () => {
+      vi.useFakeTimers()
+      process.env.LIVI_COMPOSITOR = '1'
+      const win = fakeWin()
+      win.isFullScreen.mockReturnValue(true)
+      mockedGetMainWindow.mockReturnValue(win)
+      attachResizeReflow()
+
+      win.handlers.resize()
+      vi.advanceTimersByTime(200)
+      expect(win.setContentSize).not.toHaveBeenCalled()
+      vi.useRealTimers()
+    })
+
+    test('ignores a resize on a destroyed window', () => {
+      process.env.LIVI_COMPOSITOR = '1'
+      const win = fakeWin()
+      win.isDestroyed.mockReturnValue(true)
+      mockedGetMainWindow.mockReturnValue(win)
+      attachResizeReflow()
+
+      expect(() => win.handlers.resize()).not.toThrow()
+      expect(win.setContentSize).not.toHaveBeenCalled()
     })
   })
 })

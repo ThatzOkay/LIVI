@@ -36,4 +36,34 @@ describe('audio ipc', () => {
     expect(host.setAudioVisualizerEnabled).toHaveBeenCalledWith(true, undefined)
     expect(host.setAudioVisualizerEnabled).toHaveBeenCalledWith(false, undefined)
   })
+
+  test('registers a destroyed hook that turns the visualizer off, once per window', () => {
+    const host = { setAudioStreamVolume: vi.fn(), setAudioVisualizerEnabled: vi.fn() }
+    registerAudioIpc(host)
+
+    const destroyed: Array<() => void> = []
+    const sender = {
+      id: 7,
+      once: vi.fn((ev: string, cb: () => void) => {
+        if (ev === 'destroyed') destroyed.push(cb)
+      })
+    }
+    const handler = onHandlers.get('projection-set-visualizer-enabled')!
+
+    handler({ sender }, true)
+    expect(host.setAudioVisualizerEnabled).toHaveBeenCalledWith(true, 7)
+    expect(sender.once).toHaveBeenCalledTimes(1)
+
+    // enabling again for the same window does not re-register the hook
+    handler({ sender }, true)
+    expect(sender.once).toHaveBeenCalledTimes(1)
+
+    // window destroyed → visualizer forced off and the id is untracked
+    destroyed[0]()
+    expect(host.setAudioVisualizerEnabled).toHaveBeenLastCalledWith(false, 7)
+
+    // after destruction a fresh enable re-registers the hook
+    handler({ sender }, true)
+    expect(sender.once).toHaveBeenCalledTimes(2)
+  })
 })

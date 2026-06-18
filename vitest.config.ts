@@ -1,6 +1,6 @@
 import { resolve } from 'node:path'
 import react from '@vitejs/plugin-react'
-import { defineConfig } from 'vitest/config'
+import { coverageConfigDefaults, defineConfig } from 'vitest/config'
 
 const r = (p: string): string => resolve(__dirname, p)
 
@@ -14,7 +14,8 @@ export default defineConfig({
   test: {
     coverage: {
       provider: 'v8',
-      reporter: ['text', 'text-summary', 'html', 'lcov', 'json-summary']
+      reporter: ['text', 'text-summary', 'html', 'lcov', 'json-summary'],
+      exclude: [...coverageConfigDefaults.exclude, 'native/**']
     },
     projects: [
       {
