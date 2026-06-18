@@ -18,7 +18,9 @@ jest.mock('@main/services/rtlsdr/RadioService', () => ({
     setFrequency: jest.fn(),
     setMode: jest.fn(),
     step: jest.fn(),
-    getState: jest.fn()
+    getState: jest.fn(),
+    setFavorite: jest.fn(),
+    recallFavorite: jest.fn()
   }
 }))
 
@@ -44,7 +46,9 @@ describe('registerRtlSdrIpc', () => {
       'radio-set-mode',
       'radio-set-frequency',
       'radio-step',
-      'radio-get-state'
+      'radio-get-state',
+      'radio-set-favorite',
+      'radio-recall-favorite'
     ])
   })
 
@@ -123,5 +127,23 @@ describe('registerRtlSdrIpc', () => {
     handler()
 
     expect(radioService.getState).toHaveBeenCalledTimes(1)
+  })
+
+  test('radio-set-favorite delegates to radioService.setFavorite', () => {
+    registerRtlSdrIpc()
+    const handler = getHandler<(evt: unknown, slot: number) => unknown>('radio-set-favorite')
+
+    handler({}, 2)
+
+    expect(radioService.setFavorite).toHaveBeenCalledWith(2)
+  })
+
+  test('radio-recall-favorite delegates to radioService.recallFavorite', () => {
+    registerRtlSdrIpc()
+    const handler = getHandler<(evt: unknown, slot: number) => unknown>('radio-recall-favorite')
+
+    handler({}, 3)
+
+    expect(radioService.recallFavorite).toHaveBeenCalledWith(3)
   })
 })

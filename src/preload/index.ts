@@ -96,7 +96,14 @@ type UsbLastEvent =
   | { type: 'plugged'; device: { vendorId: number; productId: number; deviceName: string } }
 
 type RadioMode = 'fm' | 'dab'
-type RadioState = { running: boolean; frequencyMhz: number; mode: RadioMode }
+type StationInfo = { id: number; genre: string; name?: string; text?: string }
+type RadioState = {
+  running: boolean
+  frequencyMhz: number
+  mode: RadioMode
+  station: StationInfo | null
+  favorites: (number | null)[]
+}
 
 const api = {
   quit: (): Promise<void> => ipcRenderer.invoke('quit'),
@@ -141,6 +148,10 @@ const api = {
     step: (direction: 1 | -1, fast?: boolean): Promise<RadioState> =>
       ipcRenderer.invoke('radio-step', { direction, fast }),
     getState: (): Promise<RadioState> => ipcRenderer.invoke('radio-get-state'),
+    setFavorite: (slot: number): Promise<RadioState> =>
+      ipcRenderer.invoke('radio-set-favorite', slot),
+    recallFavorite: (slot: number): Promise<RadioState> =>
+      ipcRenderer.invoke('radio-recall-favorite', slot),
     onEvent: (callback: ApiCallback): (() => void) => {
       radioEventHandlers.push(callback)
       radioEventQueue.forEach(([evt, ...args]) => callback(evt, ...args))

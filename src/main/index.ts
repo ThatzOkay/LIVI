@@ -11,6 +11,7 @@ import { configEvents } from '@main/ipc/utils'
 import { registerAppProtocol } from '@main/protocol/appProtocol'
 import { checkAndInstallAaSudoers } from '@main/services/projection/driver/aa/aaSudoers'
 import { ProjectionService } from '@main/services/projection/services/ProjectionService'
+import { radioService } from '@main/services/rtlsdr/RadioService'
 import { TelemetrySocket } from '@main/services/Socket'
 import { setupTelemetry } from '@main/services/telemetry/setupTelemetry'
 import { TelemetryStore } from '@main/services/telemetry/TelemetryStore'
@@ -59,6 +60,7 @@ app.whenReady().then(async () => {
   }
 
   runtimeState.telemetrySocket = telemetrySocket
+  radioService.hydrate(runtimeState.config.radio)
 
   const services = {
     projectionService,

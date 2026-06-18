@@ -2,21 +2,41 @@ import { useCallback, useEffect, useRef, useState } from 'react'
 
 export type RadioMode = 'fm' | 'dab'
 
+export type StationInfo = {
+  id: number
+  genre: string
+  name?: string
+  text?: string
+}
+
 export type RadioHookState = {
   running: boolean
   frequencyMhz: number
   mode: RadioMode
+  station: StationInfo | null
+  favorites: (number | null)[]
   error: string | null
 }
 
 type RadioEventPayload =
-  | { type: 'state'; state: { running: boolean; frequencyMhz: number; mode: RadioMode } }
+  | {
+      type: 'state'
+      state: {
+        running: boolean
+        frequencyMhz: number
+        mode: RadioMode
+        station: StationInfo | null
+        favorites: (number | null)[]
+      }
+    }
   | { type: 'error'; message: string }
 
 const DEFAULT_STATE: RadioHookState = {
   running: false,
   frequencyMhz: 100.0,
   mode: 'fm',
+  station: null,
+  favorites: [null, null, null, null, null],
   error: null
 }
 
@@ -84,6 +104,24 @@ export function useRadioState({ forceHydrate = false } = {}) {
     }
   }, [])
 
+  const setFavorite = useCallback(async (slot: number) => {
+    try {
+      const result = await window.projection.radio.setFavorite(slot)
+      setState((s) => ({ ...s, ...result, error: null }))
+    } catch (e) {
+      setState((s) => ({ ...s, error: String(e) }))
+    }
+  }, [])
+
+  const recallFavorite = useCallback(async (slot: number) => {
+    try {
+      const result = await window.projection.radio.recallFavorite(slot)
+      setState((s) => ({ ...s, ...result, error: null }))
+    } catch (e) {
+      setState((s) => ({ ...s, error: String(e) }))
+    }
+  }, [])
+
   const startedRef = useRef(false)
 
   useEffect(() => {
@@ -98,5 +136,15 @@ export function useRadioState({ forceHydrate = false } = {}) {
     }
   }, [forceHydrate, setMode, start, stop])
 
-  return { ...state, start, stop, toggle, step, setFrequency, setMode }
+  return {
+    ...state,
+    start,
+    stop,
+    toggle,
+    step,
+    setFrequency,
+    setMode,
+    setFavorite,
+    recallFavorite
+  }
 }

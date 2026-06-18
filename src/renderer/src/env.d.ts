@@ -48,10 +48,19 @@ type UsbDeviceInfo =
 
 type RadioMode = 'fm' | 'dab'
 
+type StationInfo = {
+  id: number
+  genre: string
+  name?: string
+  text?: string
+}
+
 type RadioState = {
   running: boolean
   frequencyMhz: number
   mode: RadioMode
+  station: StationInfo | null
+  favorites: (number | null)[]
 }
 
 type MediaPayload = {
@@ -141,6 +150,8 @@ declare global {
         setMode(mode: RadioMode): Promise<RadioState>
         step(direction: 1 | -1, fast?: boolean): Promise<RadioState>
         getState(): Promise<RadioState>
+        setFavorite(slot: number): Promise<RadioState>
+        recallFavorite(slot: number): Promise<RadioState>
         onEvent(callback: (event: unknown, ...args: unknown[]) => void): () => void
       }
 

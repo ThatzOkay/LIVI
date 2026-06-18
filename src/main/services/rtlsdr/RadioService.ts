@@ -1,9 +1,15 @@
+import { configEvents } from '@main/ipc/utils'
 import { AudioOutput } from '@main/services/audio'
+import type { Config, RadioConfig } from '@shared/types'
 import { BrowserWindow } from 'electron'
 
 const SAMPLE_RATE = 2048000
 const OUTPUT_RATE = 48000
 const DEFAULT_FREQUENCY_MHZ = 100.0
+const FAVORITES_SLOTS = 5
+// User-driven frequency changes (stepping/seeking) can fire in quick bursts;
+// debounce the "last frequency" write so each one doesn't hit disk.
+const PERSIST_DEBOUNCE_MS = 1000
 
 export const FM_BAND_MIN_MHZ = 87
 export const FM_BAND_MAX_MHZ = 108
@@ -12,14 +18,35 @@ export const FM_FAST_STEP_MHZ = 1.0
 
 export type RadioMode = 'fm' | 'dab'
 
+/// Mode-agnostic station metadata. FM populates this from RDS (PI/PS/RT/PTY);
+/// a future DAB mode would populate the same shape from its service label /
+/// dynamic label segment, so IPC/preload/UI consumers don't need to change.
+export type StationInfo = {
+  id: number
+  genre: string
+  name?: string
+  text?: string
+}
+
 export type RadioState = {
   running: boolean
   frequencyMhz: number
   mode: RadioMode
+  station: StationInfo | null
+  favorites: (number | null)[]
+}
+
+type RdsInfoNative = {
+  programId: number
+  programType: string
+  stationName?: string
+  radioText?: string
 }
 
 type FMPipelineLike = {
   process: (buffer: Buffer) => Float32Array
+  rds: () => RdsInfoNative
+  resetRds: () => void
 }
 
 type RtlSdrAddon = {
@@ -54,6 +81,17 @@ function clampFrequency(mhz: number): number {
   return Math.round(mhz * 10) / 10
 }
 
+function toStationInfo(r: RdsInfoNative): StationInfo | null {
+  if (r.programId === 0 && !r.stationName && !r.radioText) return null
+  return { id: r.programId, genre: r.programType, name: r.stationName, text: r.radioText }
+}
+
+function stationInfoEqual(a: StationInfo | null, b: StationInfo | null): boolean {
+  if (a === b) return true
+  if (!a || !b) return false
+  return a.id === b.id && a.genre === b.genre && a.name === b.name && a.text === b.text
+}
+
 function floatToInt16(samples: Float32Array): Int16Array {
   const out = new Int16Array(samples.length)
   for (let i = 0; i < samples.length; i++) {
@@ -72,14 +110,57 @@ class RadioService {
   private mode: RadioMode = 'fm'
   private pipeline: FMPipelineLike | null = null
   private audioOutput: AudioOutput | null = null
+  private station: StationInfo | null = null
+  private favorites: (number | null)[] = new Array(FAVORITES_SLOTS).fill(null)
+  private persistTimer: ReturnType<typeof setTimeout> | null = null
+
+  /** Restores last frequency/mode/favorites from persisted config. Call once at app startup. */
+  hydrate(radio: RadioConfig | undefined): void {
+    if (!radio) return
+    this.frequencyMhz = clampFrequency(radio.lastFrequencyMhz ?? DEFAULT_FREQUENCY_MHZ)
+    this.mode = radio.lastMode ?? 'fm'
+    const favorites = Array.isArray(radio.favorites) ? radio.favorites : []
+    this.favorites = Array.from({ length: FAVORITES_SLOTS }, (_, i) => favorites[i] ?? null)
+  }
 
   getState(): RadioState {
-    return { running: this.running, frequencyMhz: this.frequencyMhz, mode: this.mode }
+    return {
+      running: this.running,
+      frequencyMhz: this.frequencyMhz,
+      mode: this.mode,
+      station: this.station,
+      favorites: this.favorites
+    }
   }
 
   setMode(mode: RadioMode): RadioState {
     this.mode = mode
+    this.schedulePersist()
     this.broadcastState()
+    return this.getState()
+  }
+
+  getFavorites(): (number | null)[] {
+    return this.favorites
+  }
+
+  /** Saves the current frequency into a preset slot, like holding a button on a real radio. */
+  setFavorite(slot: number): RadioState {
+    if (slot >= 0 && slot < FAVORITES_SLOTS) {
+      this.favorites = this.favorites.map((f, i) => (i === slot ? this.frequencyMhz : f))
+      this.persistNow()
+      this.broadcastState()
+    }
+    return this.getState()
+  }
+
+  /** Tunes to whatever frequency is saved in a preset slot. No-op if the slot is empty. */
+  recallFavorite(slot: number): RadioState {
+    const freq = slot >= 0 && slot < FAVORITES_SLOTS ? this.favorites[slot] : null
+    if (typeof freq === 'number') {
+      if (!this.running) this.start(freq)
+      else this.tune(clampFrequency(freq))
+    }
     return this.getState()
   }
 
@@ -125,9 +206,16 @@ class RadioService {
         if (!this.running || !this.pipeline || !this.audioOutput) return
         const audio = this.pipeline.process(buf)
         this.audioOutput.write(floatToInt16(audio))
+
+        const station = toStationInfo(this.pipeline.rds())
+        if (!stationInfoEqual(this.station, station)) {
+          this.station = station
+          this.broadcastState()
+        }
       })
 
       this.running = true
+      this.schedulePersist()
       this.broadcastState()
     } catch (e) {
       this.broadcastError((e as Error).message)
@@ -150,6 +238,7 @@ class RadioService {
     this.deviceOpen = false
     this.running = false
     this.pipeline = null
+    this.station = null
     this.audioOutput?.stop()
     this.audioOutput = null
 
@@ -174,12 +263,43 @@ class RadioService {
       const a = load()
       try {
         a?.setFrequency(mhz * 1_000_000)
+        // A new frequency means a different station — clear stale RDS data
+        // and re-sync the demod chain rather than waiting for it to drift off.
+        this.pipeline?.resetRds()
+        this.station = null
       } catch (e) {
         this.broadcastError((e as Error).message)
         return
       }
     }
+    this.schedulePersist()
     this.broadcastState()
+  }
+
+  /** Debounces writes for high-frequency changes (seeking/stepping). */
+  private schedulePersist(): void {
+    if (this.persistTimer) clearTimeout(this.persistTimer)
+    this.persistTimer = setTimeout(() => {
+      this.persistTimer = null
+      this.persistNow()
+    }, PERSIST_DEBOUNCE_MS)
+  }
+
+  private persistNow(): void {
+    if (this.persistTimer) {
+      clearTimeout(this.persistTimer)
+      this.persistTimer = null
+    }
+    const radio: RadioConfig = {
+      lastFrequencyMhz: this.frequencyMhz,
+      lastMode: this.mode,
+      favorites: this.favorites
+    }
+    try {
+      configEvents.emit('requestSave', { radio } satisfies Partial<Config>)
+    } catch (e) {
+      console.warn('[RadioService] requestSave failed (ignored)', e)
+    }
   }
 
   private broadcastState(): void {

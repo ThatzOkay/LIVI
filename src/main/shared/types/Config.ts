@@ -79,6 +79,13 @@ export type LastKnownGps = {
   ts: number
 }
 
+export type RadioConfig = {
+  lastFrequencyMhz: number
+  lastMode: 'fm' | 'dab'
+  // 5 quick-access presets, like a real radio. `null` = empty slot.
+  favorites: (number | null)[]
+}
+
 export type AppearanceMode = 'auto' | 'night' | 'day'
 
 export type WindowBounds = {
@@ -215,6 +222,7 @@ export type Config = {
   auxScreenHeight: number
 
   lastKnownGps?: LastKnownGps
+  radio?: RadioConfig
 
   dongleToolsIp?: string
 

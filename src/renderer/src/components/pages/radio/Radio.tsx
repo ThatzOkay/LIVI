@@ -1,10 +1,20 @@
 import { useElementSize, useRadioState } from '../media/hooks'
 import { mediaScaleOps } from '../media/utils/mediaScaleOps'
-import { RadioControls } from './components'
+import { FavoritesRow, RadioControls } from './components'
 
 export const Radio = ({ forceHydrate = true } = {}) => {
   const [rootRef, { w, h }] = useElementSize<HTMLDivElement>()
-  const { running, frequencyMhz, error, toggle, step } = useRadioState({ forceHydrate })
+  const {
+    running,
+    frequencyMhz,
+    station,
+    favorites,
+    error,
+    toggle,
+    step,
+    setFavorite,
+    recallFavorite
+  } = useRadioState({ forceHydrate })
 
   // Scales (base) — same proportions as the Media page
   const { titlePx, pagePad, sectionGap, ctrlSize, ctrlGap } = mediaScaleOps({ w, h })
@@ -15,6 +25,8 @@ export const Radio = ({ forceHydrate = true } = {}) => {
   const freqPx = Math.round(titlePx * 2.4)
   const iconPx = Math.round(ctrlSize * 0.46)
   const iconMainPx = Math.round(ctrlSize * 0.52)
+  const favSize = Math.round(ctrlSize * 0.7)
+  const favFontPx = Math.round(favSize * 0.32)
 
   return (
     <div
@@ -44,7 +56,7 @@ export const Radio = ({ forceHydrate = true } = {}) => {
         }}
       >
         <div style={{ opacity: 0.7, fontSize: Math.round(titlePx * 0.4), letterSpacing: 2 }}>
-          FM RADIO
+          {station?.name ? station.name.trim() : 'FM RADIO'}
         </div>
 
         <div
@@ -64,6 +76,22 @@ export const Radio = ({ forceHydrate = true } = {}) => {
         <div style={{ opacity: 0.6, fontSize: Math.round(titlePx * 0.36) }}>
           {error ? error : running ? 'Playing' : 'Stopped'}
         </div>
+
+        {station?.text && (
+          <div
+            style={{
+              opacity: 0.55,
+              fontSize: Math.round(titlePx * 0.32),
+              maxWidth: '80%',
+              textAlign: 'center',
+              overflow: 'hidden',
+              textOverflow: 'ellipsis',
+              whiteSpace: 'nowrap'
+            }}
+          >
+            {station.text.trim()}
+          </div>
+        )}
       </div>
 
       <div
@@ -87,6 +115,17 @@ export const Radio = ({ forceHydrate = true } = {}) => {
           onFastForward={() => step(1, true)}
           iconPx={iconPx}
           iconMainPx={iconMainPx}
+        />
+
+        <FavoritesRow
+          ctrlGap={ctrlGap}
+          size={favSize}
+          fontPx={favFontPx}
+          favorites={favorites}
+          running={running}
+          activeFrequencyMhz={frequencyMhz}
+          onRecall={recallFavorite}
+          onSave={setFavorite}
         />
       </div>
     </div>

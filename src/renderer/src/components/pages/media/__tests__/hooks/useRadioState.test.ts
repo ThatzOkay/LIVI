@@ -6,7 +6,11 @@ const mockStop = jest.fn()
 const mockSetFrequency = jest.fn()
 const mockSetMode = jest.fn()
 const mockStep = jest.fn()
+const mockSetFavorite = jest.fn()
+const mockRecallFavorite = jest.fn()
 const mockOnEvent = jest.fn()
+
+const NO_FAVORITES = [null, null, null, null, null]
 
 beforeEach(() => {
   jest.clearAllMocks()
@@ -19,15 +23,61 @@ beforeEach(() => {
       setFrequency: mockSetFrequency,
       setMode: mockSetMode,
       step: mockStep,
+      setFavorite: mockSetFavorite,
+      recallFavorite: mockRecallFavorite,
       onEvent: mockOnEvent
     }
   }
 
-  mockStart.mockResolvedValue({ running: true, frequencyMhz: 100.0, mode: 'fm' })
-  mockStop.mockResolvedValue({ running: false, frequencyMhz: 100.0, mode: 'fm' })
-  mockSetFrequency.mockResolvedValue({ running: true, frequencyMhz: 98.0, mode: 'fm' })
-  mockSetMode.mockResolvedValue({ running: false, frequencyMhz: 100.0, mode: 'fm' })
-  mockStep.mockResolvedValue({ running: true, frequencyMhz: 100.1, mode: 'fm' })
+  mockStart.mockResolvedValue({
+    running: true,
+    frequencyMhz: 100.0,
+    mode: 'fm',
+    station: null,
+    favorites: NO_FAVORITES
+  })
+  mockStop.mockResolvedValue({
+    running: false,
+    frequencyMhz: 100.0,
+    mode: 'fm',
+    station: null,
+    favorites: NO_FAVORITES
+  })
+  mockSetFrequency.mockResolvedValue({
+    running: true,
+    frequencyMhz: 98.0,
+    mode: 'fm',
+    station: null,
+    favorites: NO_FAVORITES
+  })
+  mockSetMode.mockResolvedValue({
+    running: false,
+    frequencyMhz: 100.0,
+    mode: 'fm',
+    station: null,
+    favorites: NO_FAVORITES
+  })
+  mockStep.mockResolvedValue({
+    running: true,
+    frequencyMhz: 100.1,
+    mode: 'fm',
+    station: null,
+    favorites: NO_FAVORITES
+  })
+  mockSetFavorite.mockResolvedValue({
+    running: false,
+    frequencyMhz: 100.0,
+    mode: 'fm',
+    station: null,
+    favorites: [null, null, 100.0, null, null]
+  })
+  mockRecallFavorite.mockResolvedValue({
+    running: true,
+    frequencyMhz: 103.5,
+    mode: 'fm',
+    station: null,
+    favorites: [null, null, 103.5, null, null]
+  })
   mockOnEvent.mockReturnValue(jest.fn())
 })
 
@@ -89,6 +139,38 @@ describe('useRadioState', () => {
 
     expect(result.current.running).toBe(true)
     expect(result.current.frequencyMhz).toBe(103.5)
+  })
+
+  it('applies station info from state events', () => {
+    let handler: (ev: unknown, payload?: unknown) => void = () => {}
+    mockOnEvent.mockImplementationOnce((cb) => {
+      handler = cb
+      return jest.fn()
+    })
+
+    const { result } = renderHook(() => useRadioState())
+
+    act(() => {
+      handler(
+        {},
+        {
+          type: 'state',
+          state: {
+            running: true,
+            frequencyMhz: 103.5,
+            mode: 'fm',
+            station: { id: 4242, genre: 'Pop', name: 'TEST FM', text: 'Now playing' }
+          }
+        }
+      )
+    })
+
+    expect(result.current.station).toEqual({
+      id: 4242,
+      genre: 'Pop',
+      name: 'TEST FM',
+      text: 'Now playing'
+    })
   })
 
   it('applies error events from the main process', () => {
@@ -165,5 +247,28 @@ describe('useRadioState', () => {
     })
 
     expect(result.current.error).toContain('boom')
+  })
+
+  it('setFavorite delegates and updates state', async () => {
+    const { result } = renderHook(() => useRadioState())
+
+    await act(async () => {
+      await result.current.setFavorite(2)
+    })
+
+    expect(mockSetFavorite).toHaveBeenCalledWith(2)
+    expect(result.current.favorites).toEqual([null, null, 100.0, null, null])
+  })
+
+  it('recallFavorite delegates and updates state', async () => {
+    const { result } = renderHook(() => useRadioState())
+
+    await act(async () => {
+      await result.current.recallFavorite(2)
+    })
+
+    expect(mockRecallFavorite).toHaveBeenCalledWith(2)
+    expect(result.current.frequencyMhz).toBe(103.5)
+    expect(result.current.favorites).toEqual([null, null, 103.5, null, null])
   })
 })

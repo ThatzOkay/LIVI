@@ -8,7 +8,14 @@
  */
 export declare class FMPipeline {
   constructor(inputRate: number, outputRate: number)
+  /**
+   * Clears decoded RDS state (PI/PS/RT/PTY) and re-syncs the stereo pilot PLL and
+   * RDS demod chain. Call this after retuning — a new frequency means a different
+   * station, so the old station's RDS data must not linger.
+   */
+  resetRds(): void
   process(buf: Buffer): Float32Array
+  rds(): RdsInfo
 }
 export type FmPipeline = FMPipeline
 
@@ -19,6 +26,18 @@ export declare function getDeviceCount(): number
 export declare function getDeviceName(index: number): string
 
 export declare function open(index: number): number
+
+/**
+ * RDS (station name / radio text) metadata decoded from the same wideband
+ * signal the audio path demodulates. Pulled by JS via [`FmPipeline::rds`]
+ * rather than pushed, since it only changes a few times a minute.
+ */
+export interface RdsInfo {
+  programId: number
+  programType: string
+  stationName?: string
+  radioText?: string
+}
 
 /**
  * Starts streaming and delivers each raw IQ chunk to `callback`. Mirrors the old
@@ -32,7 +51,9 @@ export declare function setFrequency(freq: number): number
 /**
  * `gain < 0` selects automatic gain, matching the old C++ addon's `-1 = auto`
  * convention, expressed in tenths of dB like the rest of this API. Only takes
- * effect before streaming starts — `RadioService` never calls this while running.
+ * effect before streaming starts on the `desperado` backend — `RadioService`
+ * never calls this while running. The `librtlsdr` fallback applies it immediately,
+ * matching the old C++ addon.
  */
 export declare function setGain(gain: number): void
 
