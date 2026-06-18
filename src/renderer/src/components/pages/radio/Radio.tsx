@@ -67,7 +67,7 @@ export const Radio = ({ forceHydrate = true } = {}) => {
             letterSpacing: 0.5
           }}
         >
-          {frequencyMhz.toFixed(1)}
+          {frequencyMhz.toFixed(2)}
           <span style={{ fontSize: Math.round(freqPx * 0.32), opacity: 0.7, marginLeft: 8 }}>
             MHz
           </span>

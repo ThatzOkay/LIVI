@@ -13,7 +13,7 @@ const PERSIST_DEBOUNCE_MS = 1000
 
 export const FM_BAND_MIN_MHZ = 87
 export const FM_BAND_MAX_MHZ = 108
-export const FM_STEP_MHZ = 0.1
+export const FM_STEP_MHZ = 0.05
 export const FM_FAST_STEP_MHZ = 1.0
 
 export type RadioMode = 'fm' | 'dab'
@@ -78,7 +78,7 @@ function load(): RtlSdrAddon | null {
 function clampFrequency(mhz: number): number {
   if (mhz > FM_BAND_MAX_MHZ) return FM_BAND_MIN_MHZ
   if (mhz < FM_BAND_MIN_MHZ) return FM_BAND_MAX_MHZ
-  return Math.round(mhz * 10) / 10
+  return Math.round(mhz * 100) / 100
 }
 
 function toStationInfo(r: RdsInfoNative): StationInfo | null {
