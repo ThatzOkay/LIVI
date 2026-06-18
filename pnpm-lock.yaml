@@ -12,7 +12,7 @@ importers:
   .:
     dependencies:
       '@base-ui/react':
-        specifier: ^1.5.0
+        specifier: ^1.6.0
         version: 1.6.0(@types/react@19.2.17)(react-dom@19.2.7(react@19.2.7))(react@19.2.7)
       '@electron-toolkit/utils':
         specifier: 4.0.0
@@ -4983,7 +4983,7 @@ snapshots:
       es6-error: 4.1.1
       matcher: 3.0.0
       roarr: 2.15.4
-      semver: 7.7.4
+      semver: 7.8.4
       serialize-error: 7.0.1
     optional: true
 
@@ -5403,11 +5403,11 @@ snapshots:
 
   node-abi@4.31.0:
     dependencies:
-      semver: 7.7.4
+      semver: 7.8.4
 
   node-api-version@0.2.1:
     dependencies:
-      semver: 7.7.4
+      semver: 7.8.4
 
   node-gyp@12.4.0:
     dependencies:
