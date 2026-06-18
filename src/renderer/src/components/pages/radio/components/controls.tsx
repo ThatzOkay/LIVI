@@ -5,7 +5,6 @@ import FastRewindIcon from '@mui/icons-material/FastRewind'
 import PlayArrowIcon from '@mui/icons-material/PlayArrow'
 import StopIcon from '@mui/icons-material/Stop'
 import { useTheme } from '@mui/material/styles'
-import type React from 'react'
 import { useState } from 'react'
 import { circleBtnStyle } from '../../media/styles'
 

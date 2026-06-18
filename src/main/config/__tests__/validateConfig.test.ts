@@ -64,4 +64,23 @@ describe('validate', () => {
       list: ['a', 'b', 'c']
     })
   })
+
+  test('preserves optional fields present in input but absent from the schema', () => {
+    const schema = {
+      width: 800
+    }
+
+    const result = validate(
+      {
+        width: 1024,
+        radio: { lastFrequencyMhz: 98.5, lastMode: 'fm', favorites: [null, null, null, null, null] }
+      },
+      schema
+    )
+
+    expect(result).toEqual({
+      width: 1024,
+      radio: { lastFrequencyMhz: 98.5, lastMode: 'fm', favorites: [null, null, null, null, null] }
+    })
+  })
 })

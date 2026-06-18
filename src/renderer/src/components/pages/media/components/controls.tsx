@@ -3,7 +3,6 @@ import PlayArrowIcon from '@mui/icons-material/PlayArrow'
 import SkipNextIcon from '@mui/icons-material/SkipNext'
 import SkipPreviousIcon from '@mui/icons-material/SkipPrevious'
 import { useTheme } from '@mui/material/styles'
-import type React from 'react'
 import { RefObject, SetStateAction, useState } from 'react'
 import { circleBtnStyle } from '../styles'
 

@@ -189,7 +189,7 @@ class RadioService {
         }
         this.deviceOpen = true
         a.setSampleRate(SAMPLE_RATE)
-        a.setGain(150)
+        a.setGain(200)
       }
 
       a.setFrequency(this.frequencyMhz * 1_000_000)

@@ -1,7 +1,6 @@
 import StarIcon from '@mui/icons-material/Star'
 import StarBorderIcon from '@mui/icons-material/StarBorder'
 import { useTheme } from '@mui/material/styles'
-import type React from 'react'
 import { useRef, useState } from 'react'
 import { circleBtnStyle } from '../../media/styles'
 
