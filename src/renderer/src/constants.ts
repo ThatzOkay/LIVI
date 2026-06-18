@@ -3,6 +3,7 @@ export enum ROUTES {
   CLUSTER = '/cluster',
   MEDIA = '/media',
   CAMERA = '/camera',
+  RADIO = '/radio',
   SETTINGS = '/settings',
   TELEMETRY = '/telemetry',
   QUIT = 'quit',

@@ -46,6 +46,14 @@ type UsbDeviceInfo =
   | { device: false; vendorId: null; productId: null; usbFwVersion: string }
   | { device: true; vendorId: number; productId: number; usbFwVersion: string }
 
+type RadioMode = 'fm' | 'dab'
+
+type RadioState = {
+  running: boolean
+  frequencyMhz: number
+  mode: RadioMode
+}
+
 type MediaPayload = {
   timestamp: string
   payload: {
@@ -117,12 +125,23 @@ declare global {
       usb: {
         forceReset(): Promise<boolean>
         detectDongle(): Promise<boolean>
+        detectRtlSdr(): Promise<boolean>
         getDeviceInfo(): Promise<UsbDeviceInfo>
         getLastEvent(): Promise<unknown>
         getSysdefaultPrettyName(): Promise<string>
         uploadIcons(): Promise<void>
         uploadLiviScripts(): Promise<DevToolsUploadResult>
         listenForEvents(callback: (event: unknown, ...args: unknown[]) => void): () => void
+      }
+
+      radio: {
+        start(frequencyMhz?: number): Promise<RadioState>
+        stop(): Promise<RadioState>
+        setFrequency(frequencyMhz: number): Promise<RadioState>
+        setMode(mode: RadioMode): Promise<RadioState>
+        step(direction: 1 | -1, fast?: boolean): Promise<RadioState>
+        getState(): Promise<RadioState>
+        onEvent(callback: (event: unknown, ...args: unknown[]) => void): () => void
       }
 
       settings: {

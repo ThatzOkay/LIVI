@@ -1,6 +1,7 @@
 jest.mock('../../components/pages', () => ({
   Home: () => null,
   Media: () => null,
+  Radio: () => null,
   Camera: () => null,
   Maps: () => null,
   Telemetry: () => null
@@ -21,7 +22,15 @@ describe('appRoutes', () => {
   test('contains expected top-level app routes', () => {
     const root = appRoutes[0]
     const paths = (root.children ?? []).map((r: any) => r.path)
-    expect(paths).toEqual(['/home', '/telemetry', '/cluster', '/media', '/camera', '/settings/*'])
+    expect(paths).toEqual([
+      '/home',
+      '/telemetry',
+      '/cluster',
+      '/media',
+      '/radio',
+      '/camera',
+      '/settings/*'
+    ])
   })
 
   test('falls back to empty settings children when settingsRoutes is missing', () => {

@@ -5,6 +5,7 @@ export enum RoutePath {
   Home = 'home',
   Cluster = 'cluster',
   Media = 'media',
+  Radio = 'radio',
   Settings = 'settings',
   Telemetry = 'telemetry'
 }

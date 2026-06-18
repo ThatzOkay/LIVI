@@ -89,7 +89,14 @@ export default defineConfig({
             outDir: resolve(__dirname, 'out/main'),
             emptyOutDir: false,
             rolldownOptions: {
-              external: ['electron', 'usb', 'gst-video', 'node-gyp-build', ...NODE_BUILTINS],
+              external: [
+                'electron',
+                'usb',
+                'gst-video',
+                'rtl-sdr-fm',
+                'node-gyp-build',
+                ...NODE_BUILTINS
+              ],
               input: {
                 main: resolve(__dirname, 'src/main/index.ts'),
                 usbWorker: resolve(__dirname, 'src/main/services/usb/USBWorker.ts')

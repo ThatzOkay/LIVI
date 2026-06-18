@@ -12,11 +12,13 @@ import { appRoutes } from './routes/appRoutes'
 import { useLiviStore, useStatusStore } from './store/store'
 import { broadcastMediaKey } from './utils/broadcastMediaKey'
 import { updateCameras } from './utils/cameraDetection'
+import { updateRtlSdr } from './utils/rtlSdrDetection'
 import { getWindowRole } from './utils/windowRole'
 
 const START_PAGE_ROUTE: Record<string, string> = {
   home: ROUTES.HOME,
   media: ROUTES.MEDIA,
+  radio: ROUTES.RADIO,
   camera: ROUTES.CAMERA,
   settings: ROUTES.SETTINGS,
   telemetry: ROUTES.TELEMETRY
@@ -37,6 +39,7 @@ function AppInner() {
   const settings = useLiviStore((s) => s.settings)
   const saveSettings = useLiviStore((s) => s.saveSettings)
   const setCameraFound = useStatusStore((s) => s.setCameraFound)
+  const setRtlSdrConnected = useStatusStore((s) => s.setRtlSdrConnected)
   const clusterDashActive = useStatusStore((s) => s.clusterDashActive)
 
   const navRef = useRef<HTMLDivElement | null>(null)
@@ -254,6 +257,20 @@ function AppInner() {
     const unsubscribe = window.projection.usb.listenForEvents(usbHandler)
     return unsubscribe
   }, [settings, saveSettings, setCameraFound])
+
+  useEffect(() => {
+    console.log('[App] Checking for RTL-SDR...')
+    void updateRtlSdr(setRtlSdrConnected)
+    const usbHandler = (_evt: unknown, ...args: unknown[]) => {
+      const data = (args[0] ?? {}) as { type?: string }
+      if (data.type && ['attach', 'plugged', 'detach', 'unplugged'].includes(data.type)) {
+        console.log('[App] RTL-SDR event detected:', data.type)
+        void updateRtlSdr(setRtlSdrConnected)
+      }
+    }
+    const unsubscribe = window.projection.usb.listenForEvents(usbHandler)
+    return unsubscribe
+  }, [setRtlSdrConnected])
 
   const reverse = useStatusStore((s) => s.reverse)
   const cameraFound = useStatusStore((s) => s.cameraFound)

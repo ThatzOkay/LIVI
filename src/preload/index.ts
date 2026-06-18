@@ -32,6 +32,17 @@ let telemetryHandlers: TelemetryHandler[] = []
 let projectionEventQueue: Array<[IpcRendererEvent, ...unknown[]]> = []
 let projectionEventHandlers: Array<ApiCallback> = []
 
+let radioEventQueue: Array<[IpcRendererEvent, ...unknown[]]> = []
+let radioEventHandlers: Array<ApiCallback> = []
+
+ipcRenderer.on('radio-event', (event, ...args: unknown[]) => {
+  if (radioEventHandlers.length) {
+    radioEventHandlers.forEach((handler) => handler(event, ...args))
+  } else {
+    radioEventQueue.push([event, ...args])
+  }
+})
+
 ipcRenderer.on('projection-audio-chunk', (_event, payload: unknown) => {
   if (audioChunkHandler) audioChunkHandler(payload)
   else {
@@ -84,6 +95,9 @@ type UsbLastEvent =
   | { type: 'unplugged'; device: null }
   | { type: 'plugged'; device: { vendorId: number; productId: number; deviceName: string } }
 
+type RadioMode = 'fm' | 'dab'
+type RadioState = { running: boolean; frequencyMhz: number; mode: RadioMode }
+
 const api = {
   quit: (): Promise<void> => ipcRenderer.invoke('quit'),
 
@@ -101,6 +115,7 @@ const api = {
   usb: {
     forceReset: (): Promise<boolean> => ipcRenderer.invoke('usb-force-reset'),
     detectDongle: (): Promise<boolean> => ipcRenderer.invoke('usb-detect-dongle'),
+    detectRtlSdr: (): Promise<boolean> => ipcRenderer.invoke('rtl-sdr-detect'),
     getDeviceInfo: (): Promise<UsbDeviceInfo> => ipcRenderer.invoke('projection:usbDevice'),
     getLastEvent: (): Promise<UsbLastEvent> => ipcRenderer.invoke('usb-last-event'),
     getSysdefaultPrettyName: (): Promise<string> => ipcRenderer.invoke('get-sysdefault-mic-label'),
@@ -112,6 +127,26 @@ const api = {
       usbEventQueue = []
       return () => {
         usbEventHandlers = usbEventHandlers.filter((cb) => cb !== callback)
+      }
+    }
+  },
+
+  radio: {
+    start: (frequencyMhz?: number): Promise<RadioState> =>
+      ipcRenderer.invoke('radio-start', frequencyMhz),
+    stop: (): Promise<RadioState> => ipcRenderer.invoke('radio-stop'),
+    setFrequency: (frequencyMhz: number): Promise<RadioState> =>
+      ipcRenderer.invoke('radio-set-frequency', frequencyMhz),
+    setMode: (mode: RadioMode): Promise<RadioState> => ipcRenderer.invoke('radio-set-mode', mode),
+    step: (direction: 1 | -1, fast?: boolean): Promise<RadioState> =>
+      ipcRenderer.invoke('radio-step', { direction, fast }),
+    getState: (): Promise<RadioState> => ipcRenderer.invoke('radio-get-state'),
+    onEvent: (callback: ApiCallback): (() => void) => {
+      radioEventHandlers.push(callback)
+      radioEventQueue.forEach(([evt, ...args]) => callback(evt, ...args))
+      radioEventQueue = []
+      return () => {
+        radioEventHandlers = radioEventHandlers.filter((cb) => cb !== callback)
       }
     }
   },

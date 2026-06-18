@@ -1,0 +1,11 @@
+{
+  "name": "rtl-sdr",
+  "version": "0.1.0",
+  "private": true,
+  "description": "LIVI native RTL-SDR addon",
+  "main": "index.js",
+  "gypfile": true,
+  "dependencies": {
+    "node-addon-api": "^8.8.0"
+  }
+}

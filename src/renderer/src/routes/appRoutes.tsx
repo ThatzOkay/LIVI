@@ -1,5 +1,5 @@
 import { Layout } from '../components/layouts/Layout'
-import { Camera, Home, Media, Telemetry } from '../components/pages'
+import { Camera, Home, Media, Radio, Telemetry } from '../components/pages'
 import { SettingsPage } from '../components/pages/settings/SettingsPage'
 import { settingsRoutes } from './schemas/schema'
 import { RoutePath } from './types'
@@ -24,6 +24,10 @@ export const appRoutes = [
       {
         path: `/${RoutePath.Media}`,
         element: <Media />
+      },
+      {
+        path: `/${RoutePath.Radio}`,
+        element: <Radio />
       },
       {
         path: `/${RoutePath.Camera}`,

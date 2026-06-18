@@ -2,6 +2,7 @@
 import CameraOutlinedIcon from '@mui/icons-material/CameraOutlined'
 import CropPortraitOutlinedIcon from '@mui/icons-material/CropPortraitOutlined'
 import PlayCircleOutlinedIcon from '@mui/icons-material/PlayCircleOutlined'
+import RadioIcon from '@mui/icons-material/Radio'
 import SettingsOutlinedIcon from '@mui/icons-material/SettingsOutlined'
 import SpeedOutlinedIcon from '@mui/icons-material/SpeedOutlined'
 import { useTheme } from '@mui/material/styles'
@@ -19,6 +20,7 @@ export const useTabsConfig: (receivingVideo: boolean) => TabConfig[] = (receivin
   const isStreaming = useStatusStore((s) => s.isStreaming)
   const isAaActive = useStatusStore((s) => s.isAaActive)
   const isDongleConnected = useStatusStore((s) => s.isDongleConnected || s.isAaActive)
+  const isRtlSdrConnected = useStatusStore((s) => s.isRtlSdrConntected)
   const cameraFound = useStatusStore((s) => s.cameraFound)
   const cameraConfigured = useLiviStore((s) => Boolean(s.settings?.cameraId))
   const cameraReady = cameraFound || cameraConfigured
@@ -61,6 +63,15 @@ export const useTabsConfig: (receivingVideo: boolean) => TabConfig[] = (receivin
               label: 'Media',
               path: ROUTES.MEDIA,
               icon: <PlayCircleOutlinedIcon sx={{ fontSize: iconFontSize }} />
+            }
+          ]
+        : []),
+      ...(isRtlSdrConnected
+        ? [
+            {
+              label: 'Radio',
+              path: ROUTES.RADIO,
+              icon: <RadioIcon sx={{ fontSize: iconFontSize }} />
             }
           ]
         : []),
@@ -119,6 +130,15 @@ export const useTabsConfig: (receivingVideo: boolean) => TabConfig[] = (receivin
             label: 'Media',
             path: ROUTES.MEDIA,
             icon: <PlayCircleOutlinedIcon sx={{ fontSize: iconFontSize }} />
+          }
+        ]
+      : []),
+    ...(isRtlSdrConnected
+      ? [
+          {
+            label: 'Radio',
+            path: ROUTES.RADIO,
+            icon: <RadioIcon sx={{ fontSize: iconFontSize }} />
           }
         ]
       : []),

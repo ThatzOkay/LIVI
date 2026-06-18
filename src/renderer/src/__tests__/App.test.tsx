@@ -5,6 +5,7 @@ import { AppContext } from '../context'
 const navigateMock = jest.fn()
 const useKeyDownHandler = jest.fn()
 const updateCamerasMock = jest.fn()
+const updateRtlSdrMock = jest.fn()
 const listenForEvents = jest.fn()
 const unlistenForEvents = jest.fn()
 const focusFirstInMainMock = jest.fn()
@@ -45,6 +46,10 @@ jest.mock('../utils/cameraDetection', () => ({
   updateCameras: (...args: unknown[]) => updateCamerasMock(...args)
 }))
 
+jest.mock('../utils/rtlSdrDetection', () => ({
+  updateRtlSdr: (...args: unknown[]) => updateRtlSdrMock(...args)
+}))
+
 jest.mock('../hooks', () => ({
   useActiveControl: () => jest.fn(),
   useFocus: () => ({
@@ -66,6 +71,7 @@ const liviState: any = {
 }
 const statusState: any = {
   setCameraFound: jest.fn(),
+  setRtlSdrConnected: jest.fn(),
   reverse: false,
   cameraFound: false
 }
@@ -92,6 +98,7 @@ describe('App', () => {
     navigateMock.mockReset()
     useKeyDownHandler.mockReset()
     updateCamerasMock.mockReset()
+    updateRtlSdrMock.mockReset()
     listenForEvents.mockReset()
     unlistenForEvents.mockReset()
     focusFirstInMainMock.mockReset()
@@ -207,6 +214,33 @@ describe('App', () => {
     updateCamerasMock.mockClear()
 
     usbHandler(undefined, { type: 'something-else' })
+    expect(updateCamerasMock).not.toHaveBeenCalled()
+  })
+
+  test('detects rtl-sdr on mount and re-detects on matching usb event types only', () => {
+    render(<App />)
+
+    expect(updateRtlSdrMock).toHaveBeenCalledWith(statusState.setRtlSdrConnected)
+
+    const usbHandler = listenForEvents.mock.calls[1][0]
+
+    updateRtlSdrMock.mockClear()
+
+    usbHandler(undefined, { type: 'plugged' })
+    expect(updateRtlSdrMock).toHaveBeenCalledTimes(1)
+
+    updateRtlSdrMock.mockClear()
+
+    usbHandler(undefined, { type: 'something-else' })
+    expect(updateRtlSdrMock).not.toHaveBeenCalled()
+  })
+
+  test('detects rtl-sdr on mount even before settings have loaded', () => {
+    liviState.settings = null
+
+    render(<App />)
+
+    expect(updateRtlSdrMock).toHaveBeenCalledWith(statusState.setRtlSdrConnected)
     expect(updateCamerasMock).not.toHaveBeenCalled()
   })
 

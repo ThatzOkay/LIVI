@@ -1,0 +1,25 @@
+
+[package]
+authors = ["LongYinan <lynweklm@gmail.com>"]
+edition = "2021"
+name = "rtl_sdr_fm"
+version = "0.1.0"
+
+[lib]
+crate-type = ["cdylib"]
+
+[dependencies]
+desperado = { version = "0.4.2", features = ["rtlsdr"] }
+fmradio = "0.4.2"
+futures = "0.3"
+napi = "3.0.0"
+napi-derive = "3.0.0"
+num-complex = "0.4"
+tokio = { version = "1", features = ["rt", "macros", "sync"] }
+
+[build-dependencies]
+napi-build = "2"
+
+[profile.release]
+lto = true
+strip = "symbols"
