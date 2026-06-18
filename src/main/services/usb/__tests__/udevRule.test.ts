@@ -180,26 +180,53 @@ describe('udevRule', () => {
       )
     })
 
-    test('shows error dialog when pkexec exits with non-zero code', async () => {
+    test('shows error dialog with Retry/Skip when pkexec exits with non-zero code', async () => {
       mockSpawn.mockReturnValue(mkProc(127))
+      mockShowMessageBox
+        .mockResolvedValueOnce({ response: 0 })
+        .mockResolvedValueOnce({ response: 1 })
       await checkAndInstallUdevRule(mockWindow)
       expect(mockShowMessageBox).toHaveBeenLastCalledWith(
         mockWindow,
-        expect.objectContaining({ type: 'error', title: 'Installation Failed' })
+        expect.objectContaining({
+          type: 'error',
+          title: 'Installation Failed',
+          buttons: ['Retry', 'Skip']
+        })
       )
     })
 
-    test('shows error dialog when spawn emits an error', async () => {
+    test('shows error dialog with Retry/Skip when spawn emits an error', async () => {
       const proc = {
         on: jest.fn((event: string, cb: (arg: unknown) => void) => {
           if (event === 'error') setTimeout(() => cb(new Error('spawn failed')), 0)
         })
       }
       mockSpawn.mockReturnValue(proc)
+      mockShowMessageBox
+        .mockResolvedValueOnce({ response: 0 })
+        .mockResolvedValueOnce({ response: 1 })
       await checkAndInstallUdevRule(mockWindow)
       expect(mockShowMessageBox).toHaveBeenLastCalledWith(
         mockWindow,
-        expect.objectContaining({ type: 'error', title: 'Installation Failed' })
+        expect.objectContaining({
+          type: 'error',
+          title: 'Installation Failed',
+          buttons: ['Retry', 'Skip']
+        })
+      )
+    })
+
+    test('retries the install and shows success when the user clicks Retry', async () => {
+      mockSpawn.mockReturnValueOnce(mkProc(127)).mockReturnValueOnce(mkProc(0))
+      mockShowMessageBox
+        .mockResolvedValueOnce({ response: 0 })
+        .mockResolvedValueOnce({ response: 0 })
+      await checkAndInstallUdevRule(mockWindow)
+      expect(mockSpawn).toHaveBeenCalledTimes(2)
+      expect(mockShowMessageBox).toHaveBeenLastCalledWith(
+        mockWindow,
+        expect.objectContaining({ type: 'info', title: 'Done' })
       )
     })
   })

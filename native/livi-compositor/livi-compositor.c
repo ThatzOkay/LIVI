@@ -83,11 +83,12 @@ struct tinywl_server {
 	struct wlr_allocator *allocator;
 	struct wlr_scene *scene;
 	struct wlr_scene_output_layout *scene_layout;
-	// fixed z-order layers (bottom -> top): backdrop, video planes, UI, decoration
+	// fixed z-order layers (bottom -> top): backdrop, video planes, UI, decoration, overlay
 	struct wlr_scene_tree *layer_bg;
 	struct wlr_scene_tree *layer_video;
 	struct wlr_scene_tree *layer_ui;
 	struct wlr_scene_tree *layer_deco;
+	struct wlr_scene_tree *layer_overlay;   // modal dialogs, above the UI
 
 	struct wlr_xdg_shell *xdg_shell;
 	struct wl_listener new_xdg_toplevel;
@@ -161,6 +162,7 @@ struct tinywl_toplevel {
 	struct wlr_scene_tree *scene_tree;
 	struct wlr_xdg_toplevel_decoration_v1 *decoration;  // forced server-side on initial commit
 	bool is_video;
+	bool is_dialog;   // modal dialog: lives in layer_overlay, kept centered
 	// video plane: tag (claim) + AA crop region, placed by apply_video_layout
 	char tag[64];
 	bool has_crop;
@@ -1279,8 +1281,7 @@ static void xdg_toplevel_commit(struct wl_listener *listener, void *data) {
 		}
 		// classify + route: video planes are waylandsink with app_id "livi-video" (set by
 		// gst-host) and carry the claim tag. Everything else is Electron UI (routed by its
-		// "livi:<role>" title, untitled -> main). Electron's app_id is not stable across
-		// desktopName/Chromium changes, so only our own video id is matched.
+		// "livi:<role>" title, untitled -> main).
 		const char *app_id = toplevel->xdg_toplevel->app_id;
 		const char *title = toplevel->xdg_toplevel->title;
 		bool is_ui = !(app_id && strcmp(app_id, "livi-video") == 0);
@@ -1293,8 +1294,17 @@ static void xdg_toplevel_commit(struct wl_listener *listener, void *data) {
 			if (s == NULL) {
 				s = &server->screens[0];   // untitled UI (main) -> main
 			}
-			s->ui = toplevel;
 			toplevel->is_video = false;
+			const char *ui_app = getenv("LIVI_OUTPUT_APP_ID");
+			if (ui_app == NULL) {
+				ui_app = "dev.f-io.livi";
+			}
+			if (!(app_id && strcmp(app_id, ui_app) == 0)) {
+				toplevel->is_dialog = true;
+				wlr_xdg_toplevel_set_size(toplevel->xdg_toplevel, 0, 0);
+			} else {
+				s->ui = toplevel;
+			}
 		} else {
 			toplevel->is_video = true;
 			if (server->n_pending_video_tags > 0) {
@@ -1312,12 +1322,13 @@ static void xdg_toplevel_commit(struct wl_listener *listener, void *data) {
 			wl_list_insert(&server->videos, &toplevel->video_link);
 		}
 		toplevel->screen = s;
-		// fixed z-order: UI always on top of the video layer, video above the backdrop
-		wlr_scene_node_reparent(&toplevel->scene_tree->node,
-			toplevel->is_video ? server->layer_video : server->layer_ui);
+		// fixed z-order: overlay dialogs on top, then UI, then video, then backdrop
+		struct wlr_scene_tree *layer = toplevel->is_dialog ? server->layer_overlay
+			: toplevel->is_video ? server->layer_video : server->layer_ui;
+		wlr_scene_node_reparent(&toplevel->scene_tree->node, layer);
 		wlr_log(WLR_INFO, "livi: app_id='%s' title='%s' tag='%s' -> %s on screen '%s'",
 			app_id ? app_id : "(null)", title ? title : "(null)", toplevel->tag,
-			toplevel->is_video ? "video" : "ui", s->role);
+			toplevel->is_dialog ? "dialog" : toplevel->is_video ? "video" : "ui", s->role);
 
 		/* lay the new plane out: UI gets a titlebar, video fills the area below it */
 		if (toplevel->is_video) {
@@ -1332,6 +1343,24 @@ static void xdg_toplevel_commit(struct wl_listener *listener, void *data) {
 			if (cfg != NULL) {
 				apply_cfg_to_video(server, cfg, toplevel);
 			}
+		}
+	}
+
+	if (toplevel->is_dialog && toplevel->screen != NULL
+			&& !toplevel->xdg_toplevel->base->initial_commit) {
+		// keep the modal dialog centered on its screen
+		int w = toplevel->xdg_toplevel->base->geometry.width;
+		int h = toplevel->xdg_toplevel->base->geometry.height;
+		if (w <= 0 || h <= 0) {
+			w = toplevel->xdg_toplevel->base->surface->current.width;
+			h = toplevel->xdg_toplevel->base->surface->current.height;
+		}
+		if (w > 0 && h > 0) {
+			struct livi_screen *s = toplevel->screen;
+			int x = s->x + (s->width - w) / 2;
+			int y = (s->height - h) / 2;
+			wlr_scene_node_set_position(&toplevel->scene_tree->node,
+				x < s->x ? s->x : x, y < 0 ? 0 : y);
 		}
 	}
 }
@@ -1813,11 +1842,12 @@ int main(int argc, char *argv[]) {
 
 	server.scene = wlr_scene_create();
 	server.scene_layout = wlr_scene_attach_output_layout(server.scene, server.output_layout);
-	// created in z-order: backdrop (bottom), video planes, UI, decoration (top)
+	// created in z-order: backdrop (bottom), video planes, UI, decoration, overlay (top)
 	server.layer_bg = wlr_scene_tree_create(&server.scene->tree);
 	server.layer_video = wlr_scene_tree_create(&server.scene->tree);
 	server.layer_ui = wlr_scene_tree_create(&server.scene->tree);
 	server.layer_deco = wlr_scene_tree_create(&server.scene->tree);
+	server.layer_overlay = wlr_scene_tree_create(&server.scene->tree);
 
 	wl_list_init(&server.toplevels);
 	wl_list_init(&server.videos);

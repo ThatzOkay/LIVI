@@ -52,7 +52,6 @@ struct Player {
 static void ensure_init() {
   static bool done = false;
   if (!done) {
-    g_set_prgname("livi-video");
     gst_init(NULL, NULL);
     // Opt-in verbose decode/sink tracing
     if (const char* dbg = getenv("LIVI_GST_DEBUG")) {
@@ -719,6 +718,7 @@ static void livi_host_crash(int sig) {
 // fix: outside Electron, libwayland binds the system libffi, not Electron's ABI-incompatible
 // bundled copy that corrupts wayland marshalling on resize.
 static void livi_host_main(const char* sockPath, const char* crashLogPath) {
+  g_set_prgname("livi-video");
   ensure_init();
   if (crashLogPath && crashLogPath[0])
     strncpy(g_crash_log_path, crashLogPath, sizeof(g_crash_log_path) - 1);
