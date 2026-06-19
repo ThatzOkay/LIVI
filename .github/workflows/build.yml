@@ -201,7 +201,8 @@ jobs:
               libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
               ninja-build bison \
               libegl-dev libgles-dev libgbm-dev libcairo2-dev \
-              libffi-dev libexpat1-dev
+              libffi-dev libexpat1-dev \
+              librtlsdr-dev libasound2-dev
           sudo rm -rf /var/lib/apt/lists/*
           sudo pip3 install --break-system-packages --upgrade 'meson>=1.4'
 
@@ -259,7 +260,8 @@ jobs:
               libgstreamer1.0-dev libgstreamer-plugins-base1.0-dev \
               ninja-build bison \
               libegl-dev libgles-dev libgbm-dev libcairo2-dev \
-              libffi-dev libexpat1-dev
+              libffi-dev libexpat1-dev \
+              librtlsdr-dev libasound2-dev
           sudo rm -rf /var/lib/apt/lists/*
           sudo pip3 install --break-system-packages --upgrade 'meson>=1.4'
 
@@ -292,7 +294,7 @@ jobs:
           HOMEBREW_NO_AUTO_UPDATE: '1'
         run: |
           set -euo pipefail
-          for pkg in pkg-config; do
+          for pkg in pkg-config librtlsdr; do
             brew list --versions "$pkg" >/dev/null || brew install "$pkg" >/dev/null
           done
 
@@ -422,6 +424,24 @@ jobs:
           Write-Host "GStreamer MSVC root (8.3): $shortRoot"
           "GSTREAMER_1_0_ROOT_MSVC_X86_64=$shortRoot" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
           "$root\bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
+
+      # rtl-sdr-fm's build.rs links against real librtlsdr (FFI fallback for
+      # tuner chips desperado's rs_rtl backend can't drive). vcpkg ships a
+      # `rtlsdr` port and is preinstalled on GitHub-hosted Windows runners.
+      - name: Install librtlsdr (vcpkg) [windows-x64]
+        if: matrix.os == 'windows' && matrix.arch == 'x64'
+        shell: pwsh
+        run: |
+          $ErrorActionPreference = 'Stop'
+          vcpkg install rtlsdr:x64-windows
+          if ($LASTEXITCODE -ne 0) { throw "vcpkg install rtlsdr failed" }
+
+          $installedRoot = "$env:VCPKG_INSTALLATION_ROOT\installed\x64-windows"
+          if (-not (Test-Path "$installedRoot\lib\rtlsdr.lib")) {
+            throw "rtlsdr.lib not found under $installedRoot"
+          }
+          "RTLSDR_DIR=$installedRoot" | Out-File -FilePath $env:GITHUB_ENV -Append -Encoding utf8
+          "$installedRoot\bin" | Out-File -FilePath $env:GITHUB_PATH -Append -Encoding utf8
 
       - name: Install deps (pnpm) [windows-x64]
         if: matrix.os == 'windows' && matrix.arch == 'x64'
