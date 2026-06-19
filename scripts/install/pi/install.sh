@@ -29,8 +29,9 @@ for tool in curl xdg-user-dir pkexec; do
   fi
 done
 
-# Ensure the GStreamer plugins LIVI's video pipeline needs
-echo "→ Ensuring GStreamer plugins for the video pipeline"
+# Ensure the runtime deps LIVI needs: GStreamer video pipeline,
+# wireless AP (hostapd/dnsmasq) and Bluetooth pairing stack
+echo "→ Ensuring GStreamer, wireless AP and Bluetooth runtime packages"
 sudo apt-get update
 sudo apt-get install -y \
   gstreamer1.0-plugins-base \
@@ -38,7 +39,9 @@ sudo apt-get install -y \
   gstreamer1.0-plugins-bad \
   gstreamer1.0-gl \
   gstreamer1.0-libav \
-  gstreamer1.0-tools
+  gstreamer1.0-tools \
+  python3-dbus python3-gi \
+  bluez hostapd dnsmasq-base iw rfkill
 
 # ICON INSTALLATION
 ICON_URL="https://raw.githubusercontent.com/f-io/LIVI/main/assets/icons/linux/livi.png"

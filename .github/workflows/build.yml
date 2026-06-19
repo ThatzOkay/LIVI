@@ -210,25 +210,6 @@ jobs:
         if: matrix.os == 'linux' && matrix.arch == 'x64'
         run: pnpm install --frozen-lockfile
 
-      - name: Collect test coverage [linux-x64]
-        id: coverage
-        if: matrix.os == 'linux' && matrix.arch == 'x64' && (env.BUILD_BRANCH == 'main' || env.BUILD_BRANCH == 'dev')
-        shell: bash
-        run: |
-          set -euo pipefail
-          pnpm run coverage
-
-          read_coverage_pct() {
-            node -e 'const fs=require("fs");const p=process.argv[1];try{const j=JSON.parse(fs.readFileSync(p,"utf8"));const pct=Number(j?.total?.lines?.pct);process.stdout.write(Number.isFinite(pct)?pct.toFixed(2)+"%":"0.00%")}catch{process.stdout.write("0.00%")}' "$1"
-          }
-
-          MAIN_COVERAGE=$(read_coverage_pct "coverage/main/coverage-summary.json")
-          RENDERER_COVERAGE=$(read_coverage_pct "coverage/renderer/coverage-summary.json")
-
-          echo "main=$MAIN_COVERAGE" >> "$GITHUB_OUTPUT"
-          echo "renderer=$RENDERER_COVERAGE" >> "$GITHUB_OUTPUT"
-          echo "Coverage main: $MAIN_COVERAGE"
-          echo "Coverage renderer: $RENDERER_COVERAGE"
 
       - name: Build for Linux x64 (native Ubuntu)
         if: matrix.os == 'linux' && matrix.arch == 'x64'
@@ -573,8 +554,6 @@ jobs:
           electron: ${{ steps.electron.outputs.semver }}
           chromium: ${{ steps.electron.outputs.chromium }}
           electron-date: ${{ steps.electron.outputs.date }}
-          coverage-main: ${{ steps.coverage.outputs.main }}
-          coverage-renderer: ${{ steps.coverage.outputs.renderer }}
           gstreamer: ${{ steps.gst.outputs.version }}
           repo: ${{ github.repository }}
           token: ${{ secrets.GITHUB_TOKEN }}

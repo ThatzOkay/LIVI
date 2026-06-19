@@ -1,37 +1,67 @@
-const mockAddon = {
-  getDeviceCount: jest.fn(),
-  open: jest.fn(),
-  close: jest.fn(),
-  setSampleRate: jest.fn(),
-  setGain: jest.fn(),
-  setFrequency: jest.fn(),
-  readAsync: jest.fn(),
-  stopAsync: jest.fn(),
-  FMPipeline: jest.fn().mockImplementation(() => ({
-    process: jest.fn(() => new Float32Array([0.5, -2, 1.5])),
-    rds: jest.fn(() => ({ programId: 0, programType: 'None' })),
-    resetRds: jest.fn()
-  }))
-}
+import type { Mock } from 'vitest'
 
-jest.mock('rtl-sdr-fm', () => mockAddon, { virtual: true })
+// FMPipeline must be a plain constructor (not vi.fn()) — Vitest's mock proxying for
+// dynamically-imported modules loses `new`-ability on vi.fn()-wrapped properties
+// ("X is not a constructor"), so per-test pipeline swapping goes through a closure
+// variable instead of vi.fn().mockImplementationOnce().
+const { mockAddon, setNextFMPipeline } = vi.hoisted(() => {
+  const defaultPipeline = () => ({
+    process: vi.fn(() => new Float32Array([0.5, -2, 1.5])),
+    rds: vi.fn(() => ({ programId: 0, programType: 'None' })),
+    resetRds: vi.fn()
+  })
+  let nextPipeline: (() => unknown) | null = null
+  function FMPipelineCtor() {
+    const factory = nextPipeline ?? defaultPipeline
+    nextPipeline = null
+    return factory()
+  }
+  return {
+    mockAddon: {
+      getDeviceCount: vi.fn(),
+      open: vi.fn(),
+      close: vi.fn(),
+      setSampleRate: vi.fn(),
+      setGain: vi.fn(),
+      setFrequency: vi.fn(),
+      readAsync: vi.fn(),
+      stopAsync: vi.fn(),
+      FMPipeline: FMPipelineCtor
+    },
+    setNextFMPipeline: (factory: () => unknown) => {
+      nextPipeline = factory
+    }
+  }
+})
 
-const mockAudioOutput = {
-  start: jest.fn(),
-  write: jest.fn(),
-  stop: jest.fn()
-}
+vi.mock('rtl-sdr-fm', () => mockAddon)
 
-jest.mock('@main/services/audio', () => ({
-  AudioOutput: jest.fn().mockImplementation(() => mockAudioOutput)
+// Same vi.fn()-as-constructor limitation as FMPipeline above — AudioOutput must be a
+// plain constructor too.
+const { mockAudioOutput, AudioOutputCtor } = vi.hoisted(() => {
+  const mockAudioOutput = {
+    start: vi.fn(),
+    write: vi.fn(),
+    stop: vi.fn()
+  }
+  function AudioOutputCtor() {
+    return mockAudioOutput
+  }
+  return { mockAudioOutput, AudioOutputCtor }
+})
+
+vi.mock('@main/services/audio', () => ({
+  AudioOutput: AudioOutputCtor
 }))
 
-const configEventsMock = { emit: jest.fn(), on: jest.fn(), off: jest.fn() }
-jest.mock('@main/ipc/utils', () => ({ configEvents: configEventsMock }))
+const { configEventsMock } = vi.hoisted(() => ({
+  configEventsMock: { emit: vi.fn(), on: vi.fn(), off: vi.fn() }
+}))
+vi.mock('@main/ipc/utils', () => ({ configEvents: configEventsMock }))
 
-jest.mock('electron', () => ({
+vi.mock('electron', () => ({
   BrowserWindow: {
-    getAllWindows: jest.fn(() => [])
+    getAllWindows: vi.fn(() => [])
   }
 }))
 
@@ -41,12 +71,19 @@ describe('RadioService', () => {
   // eslint-disable-next-line @typescript-eslint/no-explicit-any
   let radioService: any
 
-  beforeEach(() => {
-    jest.clearAllMocks()
-    jest.resetModules()
+  // A single shared import for the whole suite: RadioService's `load()` memoizes the
+  // native addon reference once resolved, so re-importing the module fresh per test
+  // (via resetModules) is unreliable for a dynamically-imported native dep here — state
+  // is reset between tests via the service's own public API instead (below).
+  beforeAll(async () => {
+    radioService = (await import('../RadioService')).radioService
+  })
+
+  beforeEach(async () => {
+    vi.clearAllMocks()
     mockAddon.open.mockReturnValue(0)
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    radioService = require('../RadioService').radioService
+    await radioService.stop()
+    radioService.hydrate({ lastFrequencyMhz: 100, lastMode: 'fm', favorites: [] })
   })
 
   test('getState returns the default stopped state', () => {
@@ -72,8 +109,8 @@ describe('RadioService', () => {
     expect(radioService.getState().mode).toBe('dab')
   })
 
-  test('start opens the device, tunes and begins streaming audio', () => {
-    const state = radioService.start(101.3)
+  test('start opens the device, tunes and begins streaming audio', async () => {
+    const state = await radioService.start(101.3)
 
     expect(mockAddon.open).toHaveBeenCalledWith(0)
     expect(mockAddon.setSampleRate).toHaveBeenCalledWith(2048000)
@@ -89,8 +126,8 @@ describe('RadioService', () => {
     })
   })
 
-  test('readAsync callback demodulates and writes clamped PCM to the audio output', () => {
-    radioService.start(100.0)
+  test('readAsync callback demodulates and writes clamped PCM to the audio output', async () => {
+    await radioService.start(100.0)
 
     const cb = mockAddon.readAsync.mock.calls[0][0] as (buf: Buffer) => void
     cb(Buffer.from([0, 0]))
@@ -102,9 +139,9 @@ describe('RadioService', () => {
     expect(written[2]).toBe(32767)
   })
 
-  test('stop tears down audio output and the device', () => {
-    radioService.start()
-    const state = radioService.stop()
+  test('stop tears down audio output and the device', async () => {
+    await radioService.start()
+    const state = await radioService.stop()
 
     expect(mockAddon.stopAsync).toHaveBeenCalled()
     expect(mockAddon.close).toHaveBeenCalled()
@@ -118,35 +155,34 @@ describe('RadioService', () => {
     })
   })
 
-  test('setFrequency clamps to the FM band and re-tunes while running', () => {
-    radioService.start()
-    const state = radioService.setFrequency(200)
+  test('setFrequency clamps to the FM band and re-tunes while running', async () => {
+    await radioService.start()
+    const state = await radioService.setFrequency(200)
 
     expect(state.frequencyMhz).toBe(87)
     expect(mockAddon.setFrequency).toHaveBeenCalledWith(87 * 1_000_000)
   })
 
-  test('step moves by the small step and wraps at the band edges', () => {
-    radioService.start(87)
-    const state = radioService.step(-1, false)
+  test('step moves by the small step and wraps at the band edges', async () => {
+    await radioService.start(87)
+    const state = await radioService.step(-1, false)
 
     expect(state.frequencyMhz).toBe(108)
   })
 
-  test('step moves by the fast step when fast is true', () => {
-    radioService.start(100.0)
-    const state = radioService.step(1, true)
+  test('step moves by the fast step when fast is true', async () => {
+    await radioService.start(100.0)
+    const state = await radioService.step(1, true)
 
     expect(state.frequencyMhz).toBe(101.0)
   })
 
-  test('broadcasts state to all open windows', () => {
-    const win = { webContents: { send: jest.fn() } }
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const { BrowserWindow } = require('electron')
-    ;(BrowserWindow.getAllWindows as jest.Mock).mockReturnValue([win])
+  test('broadcasts state to all open windows', async () => {
+    const win = { webContents: { send: vi.fn() } }
+    const { BrowserWindow } = await import('electron')
+    ;(BrowserWindow.getAllWindows as Mock).mockReturnValue([win])
 
-    radioService.start(100.0)
+    await radioService.start(100.0)
 
     expect(win.webContents.send).toHaveBeenCalledWith('radio-event', {
       type: 'state',
@@ -160,20 +196,20 @@ describe('RadioService', () => {
     })
   })
 
-  test('readAsync callback picks up station info and broadcasts when it changes', () => {
+  test('readAsync callback picks up station info and broadcasts when it changes', async () => {
     const fmPipeline = {
-      process: jest.fn(() => new Float32Array([0])),
-      rds: jest.fn().mockReturnValueOnce({ programId: 0, programType: 'None' }).mockReturnValue({
+      process: vi.fn(() => new Float32Array([0])),
+      rds: vi.fn().mockReturnValueOnce({ programId: 0, programType: 'None' }).mockReturnValue({
         programId: 4242,
         programType: 'Pop',
         stationName: 'TEST FM',
         radioText: 'Now playing'
       }),
-      resetRds: jest.fn()
+      resetRds: vi.fn()
     }
-    mockAddon.FMPipeline.mockImplementationOnce(() => fmPipeline)
+    setNextFMPipeline(() => fmPipeline)
 
-    radioService.start(100.0)
+    await radioService.start(100.0)
     const cb = mockAddon.readAsync.mock.calls[0][0] as (buf: Buffer) => void
 
     cb(Buffer.from([0, 0]))
@@ -188,25 +224,25 @@ describe('RadioService', () => {
     })
   })
 
-  test('retuning resets RDS state on the pipeline and clears cached station info', () => {
+  test('retuning resets RDS state on the pipeline and clears cached station info', async () => {
     const fmPipeline = {
-      process: jest.fn(() => new Float32Array([0])),
-      rds: jest.fn(() => ({
+      process: vi.fn(() => new Float32Array([0])),
+      rds: vi.fn(() => ({
         programId: 4242,
         programType: 'Pop',
         stationName: 'TEST FM',
         radioText: 'Now playing'
       })),
-      resetRds: jest.fn()
+      resetRds: vi.fn()
     }
-    mockAddon.FMPipeline.mockImplementationOnce(() => fmPipeline)
+    setNextFMPipeline(() => fmPipeline)
 
-    radioService.start(100.0)
+    await radioService.start(100.0)
     const cb = mockAddon.readAsync.mock.calls[0][0] as (buf: Buffer) => void
     cb(Buffer.from([0, 0]))
     expect(radioService.getState().station).not.toBeNull()
 
-    radioService.setFrequency(98.0)
+    await radioService.setFrequency(98.0)
 
     expect(fmPipeline.resetRds).toHaveBeenCalled()
     expect(radioService.getState().station).toBeNull()
@@ -240,9 +276,9 @@ describe('RadioService', () => {
     })
   })
 
-  test('setFavorite saves the current frequency into a slot and persists it', () => {
-    jest.useFakeTimers()
-    radioService.start(98.5)
+  test('setFavorite saves the current frequency into a slot and persists it', async () => {
+    vi.useFakeTimers()
+    await radioService.start(98.5)
 
     const state = radioService.setFavorite(2)
 
@@ -252,11 +288,11 @@ describe('RadioService', () => {
     expect(configEventsMock.emit).toHaveBeenCalledWith('requestSave', {
       radio: { lastFrequencyMhz: 98.5, lastMode: 'fm', favorites: [null, null, 98.5, null, null] }
     })
-    jest.useRealTimers()
+    vi.useRealTimers()
   })
 
-  test('setFavorite ignores out-of-range slots', () => {
-    radioService.start(98.5)
+  test('setFavorite ignores out-of-range slots', async () => {
+    await radioService.start(98.5)
     const before = radioService.getState().favorites
 
     radioService.setFavorite(5)
@@ -265,51 +301,50 @@ describe('RadioService', () => {
     expect(radioService.getState().favorites).toEqual(before)
   })
 
-  test('recallFavorite tunes to the saved frequency', () => {
-    radioService.start(100.0)
+  test('recallFavorite tunes to the saved frequency', async () => {
+    await radioService.start(100.0)
     radioService.setFavorite(0)
-    radioService.setFrequency(90.0)
+    await radioService.setFrequency(90.0)
 
-    const state = radioService.recallFavorite(0)
+    const state = await radioService.recallFavorite(0)
 
     expect(state.frequencyMhz).toBe(100.0)
     expect(mockAddon.setFrequency).toHaveBeenCalledWith(100.0 * 1_000_000)
   })
 
-  test('recallFavorite is a no-op for an empty slot', () => {
-    radioService.start(100.0)
+  test('recallFavorite is a no-op for an empty slot', async () => {
+    await radioService.start(100.0)
 
-    const state = radioService.recallFavorite(3)
+    const state = await radioService.recallFavorite(3)
 
     expect(state.frequencyMhz).toBe(100.0)
   })
 
-  test('frequency changes are persisted after a debounce window', () => {
-    jest.useFakeTimers()
-    radioService.start(100.0)
+  test('frequency changes are persisted after a debounce window', async () => {
+    vi.useFakeTimers()
+    await radioService.start(100.0)
     configEventsMock.emit.mockClear()
 
-    radioService.setFrequency(98.0)
+    await radioService.setFrequency(98.0)
     expect(configEventsMock.emit).not.toHaveBeenCalled()
 
-    jest.advanceTimersByTime(1000)
+    vi.advanceTimersByTime(1000)
 
     expect(configEventsMock.emit).toHaveBeenCalledWith('requestSave', {
       radio: { lastFrequencyMhz: 98.0, lastMode: 'fm', favorites: NO_FAVORITES }
     })
-    jest.useRealTimers()
+    vi.useRealTimers()
   })
 
-  test('start reports an error and leaves state stopped when the addon is unavailable', () => {
-    jest.resetModules()
-    jest.doMock('rtl-sdr-fm', () => {
+  test('start reports an error and leaves state stopped when the addon is unavailable', async () => {
+    vi.resetModules()
+    vi.doMock('rtl-sdr-fm', () => {
       throw new Error('addon missing')
     })
-    const errorSpy = jest.spyOn(console, 'error').mockImplementation(() => undefined)
+    const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
 
-    // eslint-disable-next-line @typescript-eslint/no-var-requires
-    const fresh = require('../RadioService').radioService
-    const state = fresh.start()
+    const fresh = (await import('../RadioService')).radioService
+    const state = await fresh.start()
 
     expect(state.running).toBe(false)
     errorSpy.mockRestore()

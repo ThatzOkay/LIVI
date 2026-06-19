@@ -1,18 +1,18 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { RadioControls } from '../controls'
 
-const circleBtnStyleMock = jest.fn((size: number, state: unknown) => ({
+const circleBtnStyleMock = vi.fn((size: number, state: unknown) => ({
   width: size,
   height: size,
   border: 'none',
   ...(state as object)
 }))
 
-jest.mock('../../../media/styles', () => ({
+vi.mock('../../../media/styles', () => ({
   circleBtnStyle: (...args: Parameters<typeof circleBtnStyleMock>) => circleBtnStyleMock(...args)
 }))
 
-jest.mock('@mui/material/styles', () => ({
+vi.mock('@mui/material/styles', () => ({
   useTheme: () => ({
     palette: {
       primary: {
@@ -22,37 +22,37 @@ jest.mock('@mui/material/styles', () => ({
   })
 }))
 
-jest.mock('@mui/icons-material/PlayArrow', () => ({
+vi.mock('@mui/icons-material/PlayArrow', () => ({
   __esModule: true,
   default: () => <span data-testid="play-icon" />
 }))
-jest.mock('@mui/icons-material/Stop', () => ({
+vi.mock('@mui/icons-material/Stop', () => ({
   __esModule: true,
   default: () => <span data-testid="stop-icon" />
 }))
-jest.mock('@mui/icons-material/FastRewind', () => ({
+vi.mock('@mui/icons-material/FastRewind', () => ({
   __esModule: true,
   default: () => <span data-testid="fast-back-icon" />
 }))
-jest.mock('@mui/icons-material/FastForward', () => ({
+vi.mock('@mui/icons-material/FastForward', () => ({
   __esModule: true,
   default: () => <span data-testid="fast-forward-icon" />
 }))
-jest.mock('@mui/icons-material/ChevronLeft', () => ({
+vi.mock('@mui/icons-material/ChevronLeft', () => ({
   __esModule: true,
   default: () => <span data-testid="step-back-icon" />
 }))
-jest.mock('@mui/icons-material/ChevronRight', () => ({
+vi.mock('@mui/icons-material/ChevronRight', () => ({
   __esModule: true,
   default: () => <span data-testid="step-forward-icon" />
 }))
 
 describe('RadioControls', () => {
-  const onFastBack = jest.fn()
-  const onStepBack = jest.fn()
-  const onTogglePlay = jest.fn()
-  const onStepForward = jest.fn()
-  const onFastForward = jest.fn()
+  const onFastBack = vi.fn()
+  const onStepBack = vi.fn()
+  const onTogglePlay = vi.fn()
+  const onStepForward = vi.fn()
+  const onFastForward = vi.fn()
 
   const renderControls = (overrides?: Partial<React.ComponentProps<typeof RadioControls>>) =>
     render(
@@ -72,7 +72,7 @@ describe('RadioControls', () => {
     )
 
   beforeEach(() => {
-    jest.clearAllMocks()
+    vi.clearAllMocks()
   })
 
   test('renders all five controls', () => {
@@ -126,7 +126,7 @@ describe('RadioControls', () => {
   test('blurs button on mouse up', () => {
     renderControls()
     const btn = screen.getByLabelText('Fast skip back')
-    const blurSpy = jest.spyOn(btn, 'blur')
+    const blurSpy = vi.spyOn(btn, 'blur')
 
     fireEvent.mouseUp(btn)
 

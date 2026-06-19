@@ -1,40 +1,53 @@
 import { fireEvent, render, screen } from '@testing-library/react'
 import { Radio } from '../Radio'
 
-const mockToggle = jest.fn()
-const mockStep = jest.fn()
-let mockState: { running: boolean; frequencyMhz: number; error: string | null }
+const mockToggle = vi.fn()
+const mockStep = vi.fn()
+const mockSetFavorite = vi.fn()
+const mockRecallFavorite = vi.fn()
+const NO_FAVORITES = [null, null, null, null, null]
+let mockState: {
+  running: boolean
+  frequencyMhz: number
+  error: string | null
+  station?: { id: number; genre: string; name?: string; text?: string } | null
+  favorites?: (number | null)[]
+}
 
-jest.mock('../../media/hooks', () => ({
+vi.mock('../../media/hooks', () => ({
   useElementSize: () => [{ current: null }, { w: 800, h: 480 }],
   useRadioState: () => ({
+    station: null,
+    favorites: NO_FAVORITES,
     ...mockState,
     toggle: mockToggle,
     step: mockStep,
-    start: jest.fn(),
-    stop: jest.fn(),
-    setFrequency: jest.fn()
+    start: vi.fn(),
+    stop: vi.fn(),
+    setFrequency: vi.fn(),
+    setFavorite: mockSetFavorite,
+    recallFavorite: mockRecallFavorite
   })
 }))
 
 describe('Radio component', () => {
   beforeEach(() => {
-    jest.clearAllMocks()
+    vi.clearAllMocks()
     mockState = { running: false, frequencyMhz: 100.0, error: null }
   })
 
   test('renders the current frequency and stopped status', () => {
     render(<Radio />)
 
-    expect(screen.getByText('100.0')).toBeInTheDocument()
+    expect(screen.getByText('100.00')).toBeInTheDocument()
     expect(screen.getByText('Stopped')).toBeInTheDocument()
   })
 
-  test('renders playing status and rounds the frequency to one decimal', () => {
+  test('renders playing status and rounds the frequency to two decimals', () => {
     mockState = { running: true, frequencyMhz: 101.3, error: null }
     render(<Radio />)
 
-    expect(screen.getByText('101.3')).toBeInTheDocument()
+    expect(screen.getByText('101.30')).toBeInTheDocument()
     expect(screen.getByText('Playing')).toBeInTheDocument()
   })
 

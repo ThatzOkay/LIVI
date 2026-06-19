@@ -2,35 +2,36 @@ import { registerIpcHandle } from '@main/ipc/register'
 import { registerRtlSdrIpc } from '@main/ipc/rtlsdr'
 import { radioService } from '@main/services/rtlsdr/RadioService'
 import { detectRtlSdr } from '@main/services/rtlsdr/RtlSdrDetection'
+import type { Mock } from 'vitest'
 
-jest.mock('@main/ipc/register', () => ({
-  registerIpcHandle: jest.fn()
+vi.mock('@main/ipc/register', () => ({
+  registerIpcHandle: vi.fn()
 }))
 
-jest.mock('@main/services/rtlsdr/RtlSdrDetection', () => ({
-  detectRtlSdr: jest.fn(() => true)
+vi.mock('@main/services/rtlsdr/RtlSdrDetection', () => ({
+  detectRtlSdr: vi.fn(() => true)
 }))
 
-jest.mock('@main/services/rtlsdr/RadioService', () => ({
+vi.mock('@main/services/rtlsdr/RadioService', () => ({
   radioService: {
-    start: jest.fn(),
-    stop: jest.fn(),
-    setFrequency: jest.fn(),
-    setMode: jest.fn(),
-    step: jest.fn(),
-    getState: jest.fn(),
-    setFavorite: jest.fn(),
-    recallFavorite: jest.fn()
+    start: vi.fn(),
+    stop: vi.fn(),
+    setFrequency: vi.fn(),
+    setMode: vi.fn(),
+    step: vi.fn(),
+    getState: vi.fn(),
+    setFavorite: vi.fn(),
+    recallFavorite: vi.fn()
   }
 }))
 
 describe('registerRtlSdrIpc', () => {
   beforeEach(() => {
-    jest.clearAllMocks()
+    vi.clearAllMocks()
   })
 
   function getHandler<T = (...args: unknown[]) => unknown>(channel: string): T {
-    const pair = (registerIpcHandle as jest.Mock).mock.calls.find(([ch]) => ch === channel)
+    const pair = (registerIpcHandle as Mock).mock.calls.find(([ch]) => ch === channel)
     if (!pair) throw new Error(`Handler not registered for ${channel}`)
     return pair[1] as T
   }
@@ -38,7 +39,7 @@ describe('registerRtlSdrIpc', () => {
   test('registers all expected channels', () => {
     registerRtlSdrIpc()
 
-    const channels = (registerIpcHandle as jest.Mock).mock.calls.map(([ch]) => ch)
+    const channels = (registerIpcHandle as Mock).mock.calls.map(([ch]) => ch)
     expect(channels).toEqual([
       'rtl-sdr-detect',
       'radio-start',

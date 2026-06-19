@@ -6,6 +6,7 @@ import {
   applyAspectRatioWindowed,
   applyWindowedContentSize,
   attachKioskStateSync,
+  attachResizeReflow,
   currentKiosk,
   persistKioskAndBroadcast,
   restoreKioskAfterWmExit,
@@ -13,26 +14,29 @@ import {
   sendKioskSync
 } from '@main/window/utils'
 import { screen } from 'electron'
+import type { Mock } from 'vitest'
 
-jest.mock('@main/window/createWindow', () => ({
-  getMainWindow: jest.fn()
+vi.mock('@main/window/createWindow', () => ({
+  getMainWindow: vi.fn()
 }))
 
-jest.mock('@main/utils', () => ({
-  isMacPlatform: jest.fn(() => false),
-  pushSettingsToRenderer: jest.fn()
+vi.mock('@main/utils', () => ({
+  isMacPlatform: vi.fn(() => false),
+  pushSettingsToRenderer: vi.fn()
 }))
 
-jest.mock('@main/ipc/utils', () => ({
-  saveSettings: jest.fn()
+vi.mock('@main/ipc/utils', () => ({
+  saveSettings: vi.fn()
 }))
 
-jest.mock('electron', () => ({
+vi.mock('electron', () => ({
   screen: {
-    getDisplayMatching: jest.fn(() => ({
-      workAreaSize: { width: 1600, height: 900 }
-    })),
-    getAllDisplays: jest.fn(() => [])
+    getDisplayMatching: vi.fn(function () {
+      return {
+        workAreaSize: { width: 1600, height: 900 }
+      }
+    }),
+    getAllDisplays: vi.fn(() => [])
   }
 }))
 
@@ -40,23 +44,23 @@ type WindowHandler = () => void
 
 describe('window utils', () => {
   const originalPlatform = process.platform
-  const mockedGetDisplayMatching = screen.getDisplayMatching as jest.Mock
+  const mockedGetDisplayMatching = screen.getDisplayMatching as Mock
 
   afterEach(() => {
     Object.defineProperty(process, 'platform', { value: originalPlatform })
-    jest.clearAllMocks()
+    vi.clearAllMocks()
   })
 
   test('applyAspectRatioFullscreen sets ratio from width/height', () => {
-    const win = { setAspectRatio: jest.fn() } as any
+    const win = { setAspectRatio: vi.fn() } as any
     applyAspectRatioFullscreen(win, 800, 400)
     expect(win.setAspectRatio).toHaveBeenCalledWith(2, { width: 0, height: 0 })
   })
 
   test('applyAspectRatioWindowed resets constraints when dimensions are missing', () => {
     const win = {
-      setAspectRatio: jest.fn(),
-      setMinimumSize: jest.fn()
+      setAspectRatio: vi.fn(),
+      setMinimumSize: vi.fn()
     } as any
 
     applyAspectRatioWindowed(win, 0, 0)
@@ -67,10 +71,10 @@ describe('window utils', () => {
 
   test('applyAspectRatioWindowed clears aspect ratio and sets minimum size with frame extras', () => {
     const win = {
-      setAspectRatio: jest.fn(),
-      setMinimumSize: jest.fn(),
-      getSize: jest.fn(() => [820, 520]),
-      getContentSize: jest.fn(() => [800, 480])
+      setAspectRatio: vi.fn(),
+      setMinimumSize: vi.fn(),
+      getSize: vi.fn(() => [820, 520]),
+      getContentSize: vi.fn(() => [800, 480])
     } as any
 
     applyAspectRatioWindowed(win, 800, 480)
@@ -83,11 +87,11 @@ describe('window utils', () => {
     Object.defineProperty(process, 'platform', { value: 'darwin' })
 
     const win = {
-      setContentSize: jest.fn(),
-      setAspectRatio: jest.fn(),
-      setMinimumSize: jest.fn(),
-      getSize: jest.fn(() => [820, 520]),
-      getContentSize: jest.fn(() => [800, 480])
+      setContentSize: vi.fn(),
+      setAspectRatio: vi.fn(),
+      setMinimumSize: vi.fn(),
+      getSize: vi.fn(() => [820, 520]),
+      getContentSize: vi.fn(() => [800, 480])
     } as any
 
     applyWindowedContentSize(win, 1024, 600)
@@ -101,13 +105,15 @@ describe('window utils', () => {
     Object.defineProperty(process, 'platform', { value: 'linux' })
 
     const win = {
-      getBounds: jest.fn(() => ({ x: 0, y: 0, width: 800, height: 480 })),
-      setResizable: jest.fn(),
-      setMinimumSize: jest.fn(),
-      setContentSize: jest.fn(),
-      setAspectRatio: jest.fn(),
-      getSize: jest.fn(() => [820, 520]),
-      getContentSize: jest.fn(() => [800, 480])
+      getBounds: vi.fn(function () {
+        return { x: 0, y: 0, width: 800, height: 480 }
+      }),
+      setResizable: vi.fn(),
+      setMinimumSize: vi.fn(),
+      setContentSize: vi.fn(),
+      setAspectRatio: vi.fn(),
+      getSize: vi.fn(() => [820, 520]),
+      getContentSize: vi.fn(() => [800, 480])
     } as any
 
     mockedGetDisplayMatching.mockReturnValue({
@@ -126,13 +132,15 @@ describe('window utils', () => {
     Object.defineProperty(process, 'platform', { value: 'linux' })
 
     const win = {
-      getBounds: jest.fn(() => ({ x: 0, y: 0, width: 800, height: 480 })),
-      setResizable: jest.fn(),
-      setMinimumSize: jest.fn(),
-      setContentSize: jest.fn(),
-      setAspectRatio: jest.fn(),
-      getSize: jest.fn(() => [20, 20]),
-      getContentSize: jest.fn(() => [20, 20])
+      getBounds: vi.fn(function () {
+        return { x: 0, y: 0, width: 800, height: 480 }
+      }),
+      setResizable: vi.fn(),
+      setMinimumSize: vi.fn(),
+      setContentSize: vi.fn(),
+      setAspectRatio: vi.fn(),
+      getSize: vi.fn(() => [20, 20]),
+      getContentSize: vi.fn(() => [20, 20])
     } as any
 
     mockedGetDisplayMatching.mockReturnValue({
@@ -145,34 +153,34 @@ describe('window utils', () => {
   })
 
   test('currentKiosk returns runtime config when main window is absent', () => {
-    ;(getMainWindow as jest.Mock).mockReturnValue(null)
+    ;(getMainWindow as Mock).mockReturnValue(null)
 
     expect(currentKiosk({ kiosk: { main: true, dash: false, aux: false } } as any)).toBe(true)
   })
 
   test('currentKiosk returns runtime config when window is destroyed', () => {
-    ;(getMainWindow as jest.Mock).mockReturnValue({
-      isDestroyed: jest.fn(() => true)
+    ;(getMainWindow as Mock).mockReturnValue({
+      isDestroyed: vi.fn(() => true)
     })
 
     expect(currentKiosk({ kiosk: { main: false, dash: false, aux: false } } as any)).toBe(false)
   })
 
   test('currentKiosk reads kiosk state from native window on non-mac', () => {
-    ;(isMacPlatform as jest.Mock).mockReturnValue(false)
-    ;(getMainWindow as jest.Mock).mockReturnValue({
-      isDestroyed: jest.fn(() => false),
-      isKiosk: jest.fn(() => true)
+    ;(isMacPlatform as Mock).mockReturnValue(false)
+    ;(getMainWindow as Mock).mockReturnValue({
+      isDestroyed: vi.fn(() => false),
+      isKiosk: vi.fn(() => true)
     })
 
     expect(currentKiosk({ kiosk: { main: false, dash: false, aux: false } } as any)).toBe(true)
   })
 
   test('currentKiosk reads fullscreen state from native window on mac', () => {
-    ;(isMacPlatform as jest.Mock).mockReturnValue(true)
-    ;(getMainWindow as jest.Mock).mockReturnValue({
-      isDestroyed: jest.fn(() => false),
-      isFullScreen: jest.fn(() => true)
+    ;(isMacPlatform as Mock).mockReturnValue(true)
+    ;(getMainWindow as Mock).mockReturnValue({
+      isDestroyed: vi.fn(() => false),
+      isFullScreen: vi.fn(() => true)
     })
 
     expect(currentKiosk({ kiosk: { main: false, dash: false, aux: false } } as any)).toBe(true)
@@ -207,7 +215,7 @@ describe('window utils', () => {
   })
 
   test('sendKioskSync emits kiosk sync event', () => {
-    const send = jest.fn()
+    const send = vi.fn()
     sendKioskSync(true, { webContents: { send } } as any)
     expect(send).toHaveBeenCalledWith('settings:kiosk-sync', true)
   })
@@ -231,7 +239,7 @@ describe('window utils', () => {
 
   test('restoreKioskAfterWmExit returns early when window is absent', () => {
     Object.defineProperty(process, 'platform', { value: 'linux' })
-    ;(getMainWindow as jest.Mock).mockReturnValue(null)
+    ;(getMainWindow as Mock).mockReturnValue(null)
 
     const runtimeState = {
       wmExitedKiosk: true,
@@ -245,8 +253,8 @@ describe('window utils', () => {
 
   test('restoreKioskAfterWmExit returns early when window is destroyed', () => {
     Object.defineProperty(process, 'platform', { value: 'linux' })
-    ;(getMainWindow as jest.Mock).mockReturnValue({
-      isDestroyed: jest.fn(() => true)
+    ;(getMainWindow as Mock).mockReturnValue({
+      isDestroyed: vi.fn(() => true)
     })
 
     const runtimeState = {
@@ -261,9 +269,9 @@ describe('window utils', () => {
 
   test('restoreKioskAfterWmExit returns early when kiosk was not exited by wm', () => {
     Object.defineProperty(process, 'platform', { value: 'linux' })
-    ;(getMainWindow as jest.Mock).mockReturnValue({
-      isDestroyed: jest.fn(() => false),
-      setKiosk: jest.fn()
+    ;(getMainWindow as Mock).mockReturnValue({
+      isDestroyed: vi.fn(() => false),
+      setKiosk: vi.fn()
     })
 
     const runtimeState = {
@@ -280,12 +288,12 @@ describe('window utils', () => {
     Object.defineProperty(process, 'platform', { value: 'linux' })
 
     const win = {
-      isDestroyed: jest.fn(() => false),
-      setKiosk: jest.fn(() => {
+      isDestroyed: vi.fn(() => false),
+      setKiosk: vi.fn(function () {
         throw new Error('boom')
       })
     }
-    ;(getMainWindow as jest.Mock).mockReturnValue(win)
+    ;(getMainWindow as Mock).mockReturnValue(win)
 
     const runtimeState = {
       wmExitedKiosk: true,
@@ -303,10 +311,10 @@ describe('window utils', () => {
     Object.defineProperty(process, 'platform', { value: 'linux' })
 
     const win = {
-      isDestroyed: jest.fn(() => false),
-      setKiosk: jest.fn()
+      isDestroyed: vi.fn(() => false),
+      setKiosk: vi.fn()
     }
-    ;(getMainWindow as jest.Mock).mockReturnValue(win)
+    ;(getMainWindow as Mock).mockReturnValue(win)
 
     const runtimeState = {
       wmExitedKiosk: true,
@@ -335,7 +343,7 @@ describe('window utils', () => {
 
   test('attachKioskStateSync returns early when window is absent', () => {
     Object.defineProperty(process, 'platform', { value: 'linux' })
-    ;(getMainWindow as jest.Mock).mockReturnValue(null)
+    ;(getMainWindow as Mock).mockReturnValue(null)
 
     const runtimeState = {
       config: { kiosk: { main: false, dash: false, aux: false } },
@@ -352,13 +360,13 @@ describe('window utils', () => {
 
     const handlers: Record<string, WindowHandler> = {}
     const win = {
-      isDestroyed: jest.fn(() => false),
-      isKiosk: jest.fn(() => false),
-      on: jest.fn((event: string, handler: WindowHandler) => {
+      isDestroyed: vi.fn(() => false),
+      isKiosk: vi.fn(() => false),
+      on: vi.fn(function (event: string, handler: WindowHandler) {
         handlers[event] = handler
       })
     }
-    ;(getMainWindow as jest.Mock).mockReturnValue(win)
+    ;(getMainWindow as Mock).mockReturnValue(win)
 
     const runtimeState = {
       config: { kiosk: { main: false, dash: false, aux: false } },
@@ -388,13 +396,13 @@ describe('window utils', () => {
 
     const handlers: Record<string, WindowHandler> = {}
     const win = {
-      isDestroyed: jest.fn(() => false),
-      isKiosk: jest.fn(() => false),
-      on: jest.fn((event: string, handler: WindowHandler) => {
+      isDestroyed: vi.fn(() => false),
+      isKiosk: vi.fn(() => false),
+      on: vi.fn(function (event: string, handler: WindowHandler) {
         handlers[event] = handler
       })
     }
-    ;(getMainWindow as jest.Mock).mockReturnValue(win)
+    ;(getMainWindow as Mock).mockReturnValue(win)
 
     const runtimeState = {
       config: { kiosk: { main: false, dash: false, aux: false } },
@@ -412,13 +420,13 @@ describe('window utils', () => {
 
     const handlers: Record<string, WindowHandler> = {}
     const win = {
-      isDestroyed: jest.fn(() => false),
-      isKiosk: jest.fn(() => false),
-      on: jest.fn((event: string, handler: WindowHandler) => {
+      isDestroyed: vi.fn(() => false),
+      isKiosk: vi.fn(() => false),
+      on: vi.fn(function (event: string, handler: WindowHandler) {
         handlers[event] = handler
       })
     }
-    ;(getMainWindow as jest.Mock).mockReturnValue(win)
+    ;(getMainWindow as Mock).mockReturnValue(win)
 
     const runtimeState = {
       config: { kiosk: { main: true, dash: false, aux: false } },
@@ -439,13 +447,13 @@ describe('window utils', () => {
 
     const handlers: Record<string, WindowHandler> = {}
     const win = {
-      isDestroyed: jest.fn(() => true),
-      isKiosk: jest.fn(() => false),
-      on: jest.fn((event: string, handler: WindowHandler) => {
+      isDestroyed: vi.fn(() => true),
+      isKiosk: vi.fn(() => false),
+      on: vi.fn(function (event: string, handler: WindowHandler) {
         handlers[event] = handler
       })
     }
-    ;(getMainWindow as jest.Mock).mockReturnValue(win)
+    ;(getMainWindow as Mock).mockReturnValue(win)
 
     const runtimeState = {
       config: { kiosk: { main: false, dash: false, aux: false } },
@@ -464,14 +472,14 @@ describe('window utils', () => {
 
     const handlers: Record<string, WindowHandler> = {}
     const win = {
-      isDestroyed: jest.fn(() => false),
-      isKiosk: jest.fn(() => false),
-      on: jest.fn((event: string, handler: WindowHandler) => {
+      isDestroyed: vi.fn(() => false),
+      isKiosk: vi.fn(() => false),
+      on: vi.fn(function (event: string, handler: WindowHandler) {
         handlers[event] = handler
       }),
-      setKiosk: jest.fn()
+      setKiosk: vi.fn()
     }
-    ;(getMainWindow as jest.Mock).mockReturnValue(win)
+    ;(getMainWindow as Mock).mockReturnValue(win)
 
     const runtimeState = {
       config: { kiosk: { main: false, dash: false, aux: false } },
@@ -488,7 +496,7 @@ describe('window utils', () => {
   })
 
   describe('sanitizeBounds', () => {
-    const mockedGetAllDisplays = screen.getAllDisplays as jest.Mock
+    const mockedGetAllDisplays = screen.getAllDisplays as Mock
 
     const display = (x: number, y: number, width: number, height: number) => ({
       workArea: { x, y, width, height }
@@ -532,6 +540,102 @@ describe('window utils', () => {
       mockedGetAllDisplays.mockReturnValue([])
       const b = { x: 4000, y: 4000, width: 800, height: 480 }
       expect(sanitizeBounds(b)).toBe(b)
+    })
+  })
+
+  describe('attachResizeReflow', () => {
+    const mockedGetMainWindow = getMainWindow as Mock
+
+    function fakeWin() {
+      const handlers: Record<string, () => void> = {}
+      return {
+        handlers,
+        on: vi.fn((ev: string, cb: () => void) => {
+          handlers[ev] = cb
+        }),
+        isDestroyed: vi.fn(() => false),
+        isFullScreen: vi.fn(() => false),
+        getContentSize: vi.fn(() => [800, 480]),
+        setContentSize: vi.fn()
+      }
+    }
+
+    afterEach(() => {
+      delete process.env.LIVI_COMPOSITOR
+    })
+
+    test('is a no-op outside the compositor', () => {
+      delete process.env.LIVI_COMPOSITOR
+      const win = fakeWin()
+      mockedGetMainWindow.mockReturnValue(win)
+      attachResizeReflow()
+      expect(win.on).not.toHaveBeenCalled()
+    })
+
+    test('is a no-op when there is no main window', () => {
+      process.env.LIVI_COMPOSITOR = '1'
+      mockedGetMainWindow.mockReturnValue(null)
+      expect(() => attachResizeReflow()).not.toThrow()
+    })
+
+    test('nudges the content size after a resize settles, then restores it', () => {
+      vi.useFakeTimers()
+      process.env.LIVI_COMPOSITOR = '1'
+      const win = fakeWin()
+      mockedGetMainWindow.mockReturnValue(win)
+      attachResizeReflow()
+
+      win.handlers.resize()
+      vi.advanceTimersByTime(200) // debounce window → nudge
+      expect(win.setContentSize).toHaveBeenCalledWith(800, 481)
+
+      vi.advanceTimersByTime(60) // restore
+      expect(win.setContentSize).toHaveBeenLastCalledWith(800, 480)
+
+      vi.advanceTimersByTime(60) // clears the nudging flag
+      vi.useRealTimers()
+    })
+
+    test('debounces a burst of resizes into a single nudge', () => {
+      vi.useFakeTimers()
+      process.env.LIVI_COMPOSITOR = '1'
+      const win = fakeWin()
+      mockedGetMainWindow.mockReturnValue(win)
+      attachResizeReflow()
+
+      win.handlers.resize()
+      win.handlers.resize()
+      win.handlers.resize()
+      vi.advanceTimersByTime(200)
+
+      // only the single +1 nudge has fired so far
+      expect(win.setContentSize).toHaveBeenCalledTimes(1)
+      vi.useRealTimers()
+    })
+
+    test('skips the nudge when the window is fullscreen when the timer fires', () => {
+      vi.useFakeTimers()
+      process.env.LIVI_COMPOSITOR = '1'
+      const win = fakeWin()
+      win.isFullScreen.mockReturnValue(true)
+      mockedGetMainWindow.mockReturnValue(win)
+      attachResizeReflow()
+
+      win.handlers.resize()
+      vi.advanceTimersByTime(200)
+      expect(win.setContentSize).not.toHaveBeenCalled()
+      vi.useRealTimers()
+    })
+
+    test('ignores a resize on a destroyed window', () => {
+      process.env.LIVI_COMPOSITOR = '1'
+      const win = fakeWin()
+      win.isDestroyed.mockReturnValue(true)
+      mockedGetMainWindow.mockReturnValue(win)
+      attachResizeReflow()
+
+      expect(() => win.handlers.resize()).not.toThrow()
+      expect(win.setContentSize).not.toHaveBeenCalled()
     })
   })
 })

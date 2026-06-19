@@ -1,32 +1,39 @@
+import type { Mock } from 'vitest'
+
 type IpcHandler = (evt: unknown, ...args: unknown[]) => unknown
 const handlers = new Map<string, IpcHandler>()
 
-jest.mock('@main/ipc/register', () => ({
+vi.mock('@main/ipc/register', () => ({
   registerIpcHandle: (channel: string, handler: IpcHandler) => {
     handlers.set(channel, handler)
   },
-  registerIpcOn: jest.fn()
+  registerIpcOn: vi.fn()
 }))
+
+const { fromWebContents } = vi.hoisted(() => ({ fromWebContents: vi.fn() }))
+vi.mock('electron', () => ({ BrowserWindow: { fromWebContents } }))
 
 import { SendCommand } from '../../messages/sendable'
 import { registerClusterIpc } from '../cluster'
 
 function freshHost() {
   return {
-    getConfig: jest.fn(() => ({
-      dashboards: { dash3: { main: true, dash: false, aux: false } }
-    })) as jest.Mock,
-    setClusterRequested: jest.fn(),
-    setClusterVisible: jest.fn(),
-    resetLastClusterVideoSize: jest.fn(),
-    getLastClusterCodec: jest.fn(() => 'h264' as 'h264' | null),
-    getLastClusterVideoSize: jest.fn(() => null as { width: number; height: number } | null),
-    getClusterTargetWebContents: jest.fn(() => []),
-    send: jest.fn(async () => true)
+    getConfig: vi.fn(function () {
+      return {
+        dashboards: { dash3: { main: true, dash: false, aux: false } }
+      }
+    }) as Mock,
+    setClusterRequested: vi.fn(),
+    setClusterVisible: vi.fn(),
+    resetLastClusterVideoSize: vi.fn(),
+    getLastClusterCodec: vi.fn(() => 'h264' as 'h264' | null),
+    getLastClusterVideoSize: vi.fn(() => null as { width: number; height: number } | null),
+    getClusterTargetWebContents: vi.fn(() => []),
+    send: vi.fn(async () => true)
   }
 }
 
-beforeEach(() => handlers.clear())
+beforeEach(async () => handlers.clear())
 
 describe('cluster ipc — cluster:request', () => {
   test('enabled=false sets cluster off and resets size', async () => {
@@ -50,7 +57,7 @@ describe('cluster ipc — cluster:request', () => {
   })
 
   test('enabled=true with cluster on emits codec to each target + send focus', async () => {
-    const wc = { send: jest.fn() }
+    const wc = { send: vi.fn() }
     const host = freshHost()
     host.getClusterTargetWebContents.mockReturnValue([wc as never])
     registerClusterIpc(host)
@@ -66,7 +73,7 @@ describe('cluster ipc — cluster:request', () => {
   test('skips codec re-emit when no cached codec', async () => {
     const host = freshHost()
     host.getLastClusterCodec.mockReturnValue(null)
-    const wc = { send: jest.fn() }
+    const wc = { send: vi.fn() }
     host.getClusterTargetWebContents.mockReturnValue([wc as never])
     registerClusterIpc(host)
     await handlers.get('cluster:request')!(null, true)
@@ -76,7 +83,7 @@ describe('cluster ipc — cluster:request', () => {
   test('thrown wc.send is swallowed', async () => {
     const host = freshHost()
     const wc = {
-      send: jest.fn(() => {
+      send: vi.fn(function () {
         throw new Error('detached')
       })
     }
@@ -90,7 +97,7 @@ describe('cluster ipc — cluster:request', () => {
 
   test('thrown host.send is swallowed', async () => {
     const host = freshHost()
-    host.send.mockImplementation(() => {
+    host.send.mockImplementation(function () {
       throw new Error('not started')
     })
     registerClusterIpc(host)
@@ -98,5 +105,62 @@ describe('cluster ipc — cluster:request', () => {
       ok: true,
       enabled: true
     })
+  })
+
+  test('emits the cached cluster resolution to each target when a size is known', async () => {
+    const host = freshHost()
+    host.getLastClusterVideoSize.mockReturnValue({ width: 800, height: 480 })
+    const wc = { send: vi.fn() }
+    host.getClusterTargetWebContents.mockReturnValue([wc as never])
+    registerClusterIpc(host)
+
+    await handlers.get('cluster:request')!(null, true)
+
+    expect(wc.send).toHaveBeenCalledWith('cluster-video-resolution', { width: 800, height: 480 })
+  })
+})
+
+describe('cluster ipc — cluster:repaint-nudge', () => {
+  const originalPlatform = process.platform
+
+  beforeEach(() => {
+    handlers.clear()
+    fromWebContents.mockReset()
+    Object.defineProperty(process, 'platform', { value: 'darwin', configurable: true })
+  })
+
+  afterEach(() => {
+    Object.defineProperty(process, 'platform', { value: originalPlatform, configurable: true })
+  })
+
+  test('is a no-op off darwin', async () => {
+    Object.defineProperty(process, 'platform', { value: 'linux', configurable: true })
+    registerClusterIpc(freshHost())
+    expect(await handlers.get('cluster:repaint-nudge')!({ sender: {} })).toEqual({ ok: false })
+  })
+
+  test('returns ok:false when no window backs the sender', async () => {
+    fromWebContents.mockReturnValue(null)
+    registerClusterIpc(freshHost())
+    expect(await handlers.get('cluster:repaint-nudge')!({ sender: {} })).toEqual({ ok: false })
+  })
+
+  test('nudges the window size by 1px and restores it after the timeout', async () => {
+    vi.useFakeTimers()
+    const win = {
+      isDestroyed: vi.fn(() => false),
+      getSize: vi.fn(() => [800, 480]),
+      setSize: vi.fn()
+    }
+    fromWebContents.mockReturnValue(win)
+    registerClusterIpc(freshHost())
+
+    const r = await handlers.get('cluster:repaint-nudge')!({ sender: {} })
+    expect(win.setSize).toHaveBeenCalledWith(800, 481)
+    expect(r).toEqual({ ok: true })
+
+    vi.advanceTimersByTime(60)
+    expect(win.setSize).toHaveBeenLastCalledWith(800, 480)
+    vi.useRealTimers()
   })
 })

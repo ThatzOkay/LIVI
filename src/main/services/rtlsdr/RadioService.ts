@@ -64,10 +64,12 @@ type RtlSdrAddon = {
 let addon: RtlSdrAddon | null = null
 let loadFailed = false
 
-function load(): RtlSdrAddon | null {
+// Dynamic import (not require()) so a missing/broken native module degrades
+// gracefully via the catch below instead of crashing the app at startup.
+async function load(): Promise<RtlSdrAddon | null> {
   if (addon || loadFailed) return addon
   try {
-    addon = require('rtl-sdr-fm') as RtlSdrAddon
+    addon = (await import('rtl-sdr-fm')) as unknown as RtlSdrAddon
   } catch (e) {
     loadFailed = true
     console.error('[RadioService] native addon load failed:', (e as Error).message)
@@ -155,26 +157,26 @@ class RadioService {
   }
 
   /** Tunes to whatever frequency is saved in a preset slot. No-op if the slot is empty. */
-  recallFavorite(slot: number): RadioState {
+  async recallFavorite(slot: number): Promise<RadioState> {
     const freq = slot >= 0 && slot < FAVORITES_SLOTS ? this.favorites[slot] : null
     if (typeof freq === 'number') {
-      if (!this.running) this.start(freq)
-      else this.tune(clampFrequency(freq))
+      if (!this.running) await this.start(freq)
+      else await this.tune(clampFrequency(freq))
     }
     return this.getState()
   }
 
-  start(frequencyMhz?: number): RadioState {
+  async start(frequencyMhz?: number): Promise<RadioState> {
     if (typeof frequencyMhz === 'number' && Number.isFinite(frequencyMhz)) {
       this.frequencyMhz = clampFrequency(frequencyMhz)
     }
 
     if (this.running) {
-      this.tune(this.frequencyMhz)
+      await this.tune(this.frequencyMhz)
       return this.getState()
     }
 
-    const a = load()
+    const a = await load()
     if (!a) {
       this.broadcastError('RTL-SDR addon unavailable')
       return this.getState()
@@ -202,7 +204,7 @@ class RadioService {
       })
       this.audioOutput.start()
 
-      a.readAsync((buf) => {
+      a.readAsync((buf: Buffer) => {
         if (!this.running || !this.pipeline || !this.audioOutput) return
         const audio = this.pipeline.process(buf)
         this.audioOutput.write(floatToInt16(audio))
@@ -224,10 +226,10 @@ class RadioService {
     return this.getState()
   }
 
-  stop(): RadioState {
+  async stop(): Promise<RadioState> {
     if (!this.running) return this.getState()
 
-    const a = load()
+    const a = await load()
     try {
       a?.stopAsync()
       a?.close()
@@ -246,21 +248,21 @@ class RadioService {
     return this.getState()
   }
 
-  setFrequency(mhz: number): RadioState {
-    this.tune(clampFrequency(mhz))
+  async setFrequency(mhz: number): Promise<RadioState> {
+    await this.tune(clampFrequency(mhz))
     return this.getState()
   }
 
-  step(direction: 1 | -1, fast: boolean): RadioState {
+  async step(direction: 1 | -1, fast: boolean): Promise<RadioState> {
     const delta = (fast ? FM_FAST_STEP_MHZ : FM_STEP_MHZ) * direction
-    this.tune(clampFrequency(this.frequencyMhz + delta))
+    await this.tune(clampFrequency(this.frequencyMhz + delta))
     return this.getState()
   }
 
-  private tune(mhz: number): void {
+  private async tune(mhz: number): Promise<void> {
     this.frequencyMhz = mhz
     if (this.running) {
-      const a = load()
+      const a = await load()
       try {
         a?.setFrequency(mhz * 1_000_000)
         // A new frequency means a different station — clear stale RDS data

@@ -1,19 +1,19 @@
 import { act, renderHook } from '@testing-library/react'
 import { useRadioState } from '../../hooks'
 
-const mockStart = jest.fn()
-const mockStop = jest.fn()
-const mockSetFrequency = jest.fn()
-const mockSetMode = jest.fn()
-const mockStep = jest.fn()
-const mockSetFavorite = jest.fn()
-const mockRecallFavorite = jest.fn()
-const mockOnEvent = jest.fn()
+const mockStart = vi.fn()
+const mockStop = vi.fn()
+const mockSetFrequency = vi.fn()
+const mockSetMode = vi.fn()
+const mockStep = vi.fn()
+const mockSetFavorite = vi.fn()
+const mockRecallFavorite = vi.fn()
+const mockOnEvent = vi.fn()
 
 const NO_FAVORITES = [null, null, null, null, null]
 
 beforeEach(() => {
-  jest.clearAllMocks()
+  vi.clearAllMocks()
   // eslint-disable-next-line @typescript-eslint/ban-ts-comment
   // @ts-expect-error
   ;(window as never).projection = {
@@ -78,7 +78,7 @@ beforeEach(() => {
     station: null,
     favorites: [null, null, 103.5, null, null]
   })
-  mockOnEvent.mockReturnValue(jest.fn())
+  mockOnEvent.mockReturnValue(vi.fn())
 })
 
 describe('useRadioState', () => {
@@ -114,7 +114,7 @@ describe('useRadioState', () => {
   })
 
   it('subscribes to radio events and unsubscribes on unmount', () => {
-    const unsubscribe = jest.fn()
+    const unsubscribe = vi.fn()
     mockOnEvent.mockReturnValueOnce(unsubscribe)
 
     const { unmount } = renderHook(() => useRadioState())
@@ -128,7 +128,7 @@ describe('useRadioState', () => {
     let handler: (ev: unknown, payload?: unknown) => void = () => {}
     mockOnEvent.mockImplementationOnce((cb) => {
       handler = cb
-      return jest.fn()
+      return vi.fn()
     })
 
     const { result } = renderHook(() => useRadioState())
@@ -145,7 +145,7 @@ describe('useRadioState', () => {
     let handler: (ev: unknown, payload?: unknown) => void = () => {}
     mockOnEvent.mockImplementationOnce((cb) => {
       handler = cb
-      return jest.fn()
+      return vi.fn()
     })
 
     const { result } = renderHook(() => useRadioState())
@@ -177,7 +177,7 @@ describe('useRadioState', () => {
     let handler: (ev: unknown, payload?: unknown) => void = () => {}
     mockOnEvent.mockImplementationOnce((cb) => {
       handler = cb
-      return jest.fn()
+      return vi.fn()
     })
 
     const { result } = renderHook(() => useRadioState())

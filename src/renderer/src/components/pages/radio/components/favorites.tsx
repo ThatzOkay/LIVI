@@ -87,7 +87,7 @@ export const FavoritesRow = ({
               aria-pressed={isActive}
               aria-label={
                 freq != null
-                  ? `Preset ${slot + 1}: ${freq.toFixed(1)} MHz.${isActive ? ' Now playing.' : ' Hold to overwrite.'}`
+                  ? `Preset ${slot + 1}: ${freq.toFixed(2)} MHz.${isActive ? ' Now playing.' : ' Hold to overwrite.'}`
                   : `Preset ${slot + 1}: empty. Hold to save current frequency.`
               }
               style={{
@@ -102,7 +102,7 @@ export const FavoritesRow = ({
                 opacity: freq != null ? 1 : 0.45
               }}
             >
-              {freq != null ? freq.toFixed(1) : slot + 1}
+              {freq != null ? freq.toFixed(2) : slot + 1}
             </button>
           )
         })}
