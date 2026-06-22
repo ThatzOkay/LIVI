@@ -1,0 +1,3 @@
+[submodule "vendor/welle.io"]
+	path = vendor/welle.io
+	url = https://github.com/AlbrechtL/welle.io.git

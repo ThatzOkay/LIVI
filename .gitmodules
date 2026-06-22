@@ -1,0 +1,3 @@
+[submodule "native/rtl-sdr-dab/vendor/welle.io"]
+	path = native/rtl-sdr-dab/vendor/welle.io
+	url = https://github.com/AlbrechtL/welle.io.git

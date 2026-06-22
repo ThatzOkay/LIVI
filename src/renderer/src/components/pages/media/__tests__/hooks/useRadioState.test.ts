@@ -5,12 +5,29 @@ const mockStart = vi.fn()
 const mockStop = vi.fn()
 const mockSetFrequency = vi.fn()
 const mockSetMode = vi.fn()
+const mockGetState = vi.fn()
 const mockStep = vi.fn()
 const mockSetFavorite = vi.fn()
 const mockRecallFavorite = vi.fn()
 const mockOnEvent = vi.fn()
 
+const mockDabGetState = vi.fn()
+const mockDabScan = vi.fn()
+const mockDabSelectStation = vi.fn()
+const mockDabStop = vi.fn()
+const mockDabSetFavorite = vi.fn()
+const mockDabRecallFavorite = vi.fn()
+
 const NO_FAVORITES = [null, null, null, null, null]
+const NO_DAB_FAVORITES = [null, null, null, null, null]
+const DEFAULT_DAB_STATE = {
+  running: false,
+  scanning: false,
+  scanningChannel: null,
+  stations: [],
+  currentStation: null,
+  favorites: NO_DAB_FAVORITES
+}
 
 beforeEach(() => {
   vi.clearAllMocks()
@@ -22,10 +39,19 @@ beforeEach(() => {
       stop: mockStop,
       setFrequency: mockSetFrequency,
       setMode: mockSetMode,
+      getState: mockGetState,
       step: mockStep,
       setFavorite: mockSetFavorite,
       recallFavorite: mockRecallFavorite,
-      onEvent: mockOnEvent
+      onEvent: mockOnEvent,
+      dab: {
+        getState: mockDabGetState,
+        scan: mockDabScan,
+        selectStation: mockDabSelectStation,
+        stop: mockDabStop,
+        setFavorite: mockDabSetFavorite,
+        recallFavorite: mockDabRecallFavorite
+      }
     }
   }
 
@@ -57,6 +83,13 @@ beforeEach(() => {
     station: null,
     favorites: NO_FAVORITES
   })
+  mockGetState.mockResolvedValue({
+    running: false,
+    frequencyMhz: 100.0,
+    mode: 'fm',
+    station: null,
+    favorites: NO_FAVORITES
+  })
   mockStep.mockResolvedValue({
     running: true,
     frequencyMhz: 100.1,
@@ -79,6 +112,7 @@ beforeEach(() => {
     favorites: [null, null, 103.5, null, null]
   })
   mockOnEvent.mockReturnValue(vi.fn())
+  mockDabGetState.mockResolvedValue(DEFAULT_DAB_STATE)
 })
 
 describe('useRadioState', () => {
@@ -94,23 +128,45 @@ describe('useRadioState', () => {
   it('does not autostart when forceHydrate is false', () => {
     renderHook(() => useRadioState({ forceHydrate: false }))
 
+    expect(mockGetState).not.toHaveBeenCalled()
     expect(mockStart).not.toHaveBeenCalled()
-    expect(mockSetMode).not.toHaveBeenCalled()
   })
 
-  it('sets mode to fm and autostarts, then stops on unmount when forceHydrate is true', async () => {
+  it('fetches the persisted mode and autostarts FM, then stops on unmount when forceHydrate is true', async () => {
     const { unmount } = renderHook(() => useRadioState({ forceHydrate: true }))
 
     await act(async () => {
       await Promise.resolve()
+      await Promise.resolve()
     })
 
-    expect(mockSetMode).toHaveBeenCalledWith('fm')
+    expect(mockGetState).toHaveBeenCalledTimes(1)
     expect(mockStart).toHaveBeenCalledTimes(1)
 
     unmount()
 
     expect(mockStop).toHaveBeenCalledTimes(1)
+    expect(mockDabStop).toHaveBeenCalledTimes(1)
+  })
+
+  it('does not autostart FM when the persisted mode is dab', async () => {
+    mockGetState.mockResolvedValue({
+      running: false,
+      frequencyMhz: 100.0,
+      mode: 'dab',
+      station: null,
+      favorites: NO_FAVORITES
+    })
+
+    renderHook(() => useRadioState({ forceHydrate: true }))
+
+    await act(async () => {
+      await Promise.resolve()
+      await Promise.resolve()
+    })
+
+    expect(mockGetState).toHaveBeenCalledTimes(1)
+    expect(mockStart).not.toHaveBeenCalled()
   })
 
   it('subscribes to radio events and unsubscribes on unmount', () => {

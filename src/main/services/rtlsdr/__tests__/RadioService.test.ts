@@ -82,8 +82,8 @@ describe('RadioService', () => {
   beforeEach(async () => {
     vi.clearAllMocks()
     mockAddon.open.mockReturnValue(0)
-    await radioService.stop()
-    radioService.hydrate({ lastFrequencyMhz: 100, lastMode: 'fm', favorites: [] })
+    await radioService.stopFm()
+    await radioService.hydrate({ lastFrequencyMhz: 100, lastMode: 'fm', favorites: [] })
   })
 
   test('getState returns the default stopped state', () => {
@@ -110,7 +110,7 @@ describe('RadioService', () => {
   })
 
   test('start opens the device, tunes and begins streaming audio', async () => {
-    const state = await radioService.start(101.3)
+    const state = await radioService.startFm(101.3)
 
     expect(mockAddon.open).toHaveBeenCalledWith(0)
     expect(mockAddon.setSampleRate).toHaveBeenCalledWith(2048000)
@@ -127,7 +127,7 @@ describe('RadioService', () => {
   })
 
   test('readAsync callback demodulates and writes clamped PCM to the audio output', async () => {
-    await radioService.start(100.0)
+    await radioService.startFm(100.0)
 
     const cb = mockAddon.readAsync.mock.calls[0][0] as (buf: Buffer) => void
     cb(Buffer.from([0, 0]))
@@ -140,8 +140,8 @@ describe('RadioService', () => {
   })
 
   test('stop tears down audio output and the device', async () => {
-    await radioService.start()
-    const state = await radioService.stop()
+    await radioService.startFm()
+    const state = await radioService.stopFm()
 
     expect(mockAddon.stopAsync).toHaveBeenCalled()
     expect(mockAddon.close).toHaveBeenCalled()
@@ -156,23 +156,23 @@ describe('RadioService', () => {
   })
 
   test('setFrequency clamps to the FM band and re-tunes while running', async () => {
-    await radioService.start()
-    const state = await radioService.setFrequency(200)
+    await radioService.startFm()
+    const state = await radioService.setFmFrequency(200)
 
     expect(state.frequencyMhz).toBe(87)
     expect(mockAddon.setFrequency).toHaveBeenCalledWith(87 * 1_000_000)
   })
 
   test('step moves by the small step and wraps at the band edges', async () => {
-    await radioService.start(87)
-    const state = await radioService.step(-1, false)
+    await radioService.startFm(87)
+    const state = await radioService.stepFm(-1, false)
 
     expect(state.frequencyMhz).toBe(108)
   })
 
   test('step moves by the fast step when fast is true', async () => {
-    await radioService.start(100.0)
-    const state = await radioService.step(1, true)
+    await radioService.startFm(100.0)
+    const state = await radioService.stepFm(1, true)
 
     expect(state.frequencyMhz).toBe(101.0)
   })
@@ -182,7 +182,7 @@ describe('RadioService', () => {
     const { BrowserWindow } = await import('electron')
     ;(BrowserWindow.getAllWindows as Mock).mockReturnValue([win])
 
-    await radioService.start(100.0)
+    await radioService.startFm(100.0)
 
     expect(win.webContents.send).toHaveBeenCalledWith('radio-event', {
       type: 'state',
@@ -209,7 +209,7 @@ describe('RadioService', () => {
     }
     setNextFMPipeline(() => fmPipeline)
 
-    await radioService.start(100.0)
+    await radioService.startFm(100.0)
     const cb = mockAddon.readAsync.mock.calls[0][0] as (buf: Buffer) => void
 
     cb(Buffer.from([0, 0]))
@@ -237,19 +237,19 @@ describe('RadioService', () => {
     }
     setNextFMPipeline(() => fmPipeline)
 
-    await radioService.start(100.0)
+    await radioService.startFm(100.0)
     const cb = mockAddon.readAsync.mock.calls[0][0] as (buf: Buffer) => void
     cb(Buffer.from([0, 0]))
     expect(radioService.getState().station).not.toBeNull()
 
-    await radioService.setFrequency(98.0)
+    await radioService.setFmFrequency(98.0)
 
     expect(fmPipeline.resetRds).toHaveBeenCalled()
     expect(radioService.getState().station).toBeNull()
   })
 
-  test('hydrate restores last frequency, mode and favorites from persisted config', () => {
-    radioService.hydrate({
+  test('hydrate restores last frequency, mode and favorites from persisted config', async () => {
+    await radioService.hydrate({
       lastFrequencyMhz: 98.5,
       lastMode: 'dab',
       favorites: [88.0, null, 103.5]
@@ -264,8 +264,8 @@ describe('RadioService', () => {
     })
   })
 
-  test('hydrate is a no-op when there is nothing persisted', () => {
-    radioService.hydrate(undefined)
+  test('hydrate is a no-op when there is nothing persisted', async () => {
+    await radioService.hydrate(undefined)
 
     expect(radioService.getState()).toEqual({
       running: false,
@@ -278,60 +278,70 @@ describe('RadioService', () => {
 
   test('setFavorite saves the current frequency into a slot and persists it', async () => {
     vi.useFakeTimers()
-    await radioService.start(98.5)
+    await radioService.startFm(98.5)
 
-    const state = radioService.setFavorite(2)
+    const state = radioService.setFmFavorite(2)
 
     expect(state.favorites).toEqual([null, null, 98.5, null, null])
     expect(radioService.getState().favorites).toEqual([null, null, 98.5, null, null])
     // Favorites are a deliberate save action — persisted immediately, not debounced.
     expect(configEventsMock.emit).toHaveBeenCalledWith('requestSave', {
-      radio: { lastFrequencyMhz: 98.5, lastMode: 'fm', favorites: [null, null, 98.5, null, null] }
+      radio: {
+        lastFrequencyMhz: 98.5,
+        lastMode: 'fm',
+        favorites: [null, null, 98.5, null, null],
+        dabFavorites: NO_FAVORITES
+      }
     })
     vi.useRealTimers()
   })
 
   test('setFavorite ignores out-of-range slots', async () => {
-    await radioService.start(98.5)
+    await radioService.startFm(98.5)
     const before = radioService.getState().favorites
 
-    radioService.setFavorite(5)
-    radioService.setFavorite(-1)
+    radioService.setFmFavorite(5)
+    radioService.setFmFavorite(-1)
 
     expect(radioService.getState().favorites).toEqual(before)
   })
 
   test('recallFavorite tunes to the saved frequency', async () => {
-    await radioService.start(100.0)
-    radioService.setFavorite(0)
-    await radioService.setFrequency(90.0)
+    await radioService.startFm(100.0)
+    radioService.setFmFavorite(0)
+    await radioService.setFmFrequency(90.0)
 
-    const state = await radioService.recallFavorite(0)
+    const state = await radioService.recallFmFavorite(0)
 
     expect(state.frequencyMhz).toBe(100.0)
     expect(mockAddon.setFrequency).toHaveBeenCalledWith(100.0 * 1_000_000)
   })
 
   test('recallFavorite is a no-op for an empty slot', async () => {
-    await radioService.start(100.0)
+    await radioService.startFm(100.0)
 
-    const state = await radioService.recallFavorite(3)
+    const state = await radioService.recallFmFavorite(3)
 
     expect(state.frequencyMhz).toBe(100.0)
   })
 
   test('frequency changes are persisted after a debounce window', async () => {
     vi.useFakeTimers()
-    await radioService.start(100.0)
+    await radioService.startFm(100.0)
     configEventsMock.emit.mockClear()
 
-    await radioService.setFrequency(98.0)
+    await radioService.setFmFrequency(98.0)
     expect(configEventsMock.emit).not.toHaveBeenCalled()
 
     vi.advanceTimersByTime(1000)
 
     expect(configEventsMock.emit).toHaveBeenCalledWith('requestSave', {
-      radio: { lastFrequencyMhz: 98.0, lastMode: 'fm', favorites: NO_FAVORITES }
+      radio: {
+        lastFrequencyMhz: 98.0,
+        lastMode: 'fm',
+        favorites: NO_FAVORITES,
+        dabFavorites: NO_FAVORITES
+      }
     })
     vi.useRealTimers()
   })
@@ -344,7 +354,7 @@ describe('RadioService', () => {
     const errorSpy = vi.spyOn(console, 'error').mockImplementation(() => undefined)
 
     const fresh = (await import('../RadioService')).radioService
-    const state = await fresh.start()
+    const state = await fresh.startFm()
 
     expect(state.running).toBe(false)
     errorSpy.mockRestore()

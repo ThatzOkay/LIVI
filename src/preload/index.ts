@@ -105,6 +105,25 @@ type RadioState = {
   favorites: (number | null)[]
 }
 
+// DAB has no continuous tuning — a station only exists within the ensemble
+// of a specific channel, so it carries the channel's frequency alongside its
+// service id. imageUrl is a cached slideshow image, attached at runtime only.
+type DabStationRef = {
+  id: number
+  label: string
+  channel: string
+  frequencyHz: number
+  imageUrl?: string
+}
+type DabState = {
+  running: boolean
+  scanning: boolean
+  scanningChannel: string | null
+  stations: DabStationRef[]
+  currentStation: DabStationRef | null
+  favorites: (DabStationRef | null)[]
+}
+
 const api = {
   quit: (): Promise<void> => ipcRenderer.invoke('quit'),
 
@@ -159,6 +178,18 @@ const api = {
       return () => {
         radioEventHandlers = radioEventHandlers.filter((cb) => cb !== callback)
       }
+    },
+
+    dab: {
+      scan: (): Promise<DabState> => ipcRenderer.invoke('radio-dab-scan'),
+      selectStation: (station: DabStationRef): Promise<DabState> =>
+        ipcRenderer.invoke('radio-dab-select-station', station),
+      stop: (): Promise<DabState> => ipcRenderer.invoke('radio-dab-stop'),
+      getState: (): Promise<DabState> => ipcRenderer.invoke('radio-dab-get-state'),
+      setFavorite: (slot: number): Promise<DabState> =>
+        ipcRenderer.invoke('radio-dab-set-favorite', slot),
+      recallFavorite: (slot: number): Promise<DabState> =>
+        ipcRenderer.invoke('radio-dab-recall-favorite', slot)
     }
   },
 

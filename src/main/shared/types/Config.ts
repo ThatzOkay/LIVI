@@ -79,11 +79,22 @@ export type LastKnownGps = {
   ts: number
 }
 
+// DAB has no continuous tuning — a station only exists within the ensemble
+// of a specific channel, so a saved/recalled station needs to carry the
+// channel's frequency alongside its service id.
+export type DabStationRef = {
+  id: number
+  label: string
+  channel: string
+  frequencyHz: number
+}
+
 export type RadioConfig = {
   lastFrequencyMhz: number
   lastMode: 'fm' | 'dab'
   // 5 quick-access presets, like a real radio. `null` = empty slot.
   favorites: (number | null)[]
+  dabFavorites?: (DabStationRef | null)[]
 }
 
 export type AppearanceMode = 'auto' | 'night' | 'day'

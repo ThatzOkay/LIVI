@@ -60,7 +60,7 @@ app.whenReady().then(async () => {
   }
 
   runtimeState.telemetrySocket = telemetrySocket
-  radioService.hydrate(runtimeState.config.radio)
+  await radioService.hydrate(runtimeState.config.radio)
 
   const services = {
     projectionService,

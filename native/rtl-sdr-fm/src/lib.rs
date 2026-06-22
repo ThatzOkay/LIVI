@@ -463,7 +463,7 @@ impl FmPipeline {
       extractor: PhaseExtractor::new(),
       resampler,
       deemph: DeemphasisFilter::new(output_rate as f32, 50e-6),
-      volume: 4.0,
+      volume: 10.0,
       mpx_rate,
       decim_factor,
       mpx_decimator: Decimator::new(decim_factor),

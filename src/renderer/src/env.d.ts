@@ -1,5 +1,5 @@
 import type { ElectronAPI } from '@electron-toolkit/preload'
-import type { Config, DongleFirmwareAction } from '@shared/types'
+import type { Config, DabStationRef, DongleFirmwareAction } from '@shared/types'
 import type { MultiTouchPoint } from '@shared/types/TouchTypes'
 
 // Should move to src/types/usb.ts
@@ -61,6 +61,19 @@ type RadioState = {
   mode: RadioMode
   station: StationInfo | null
   favorites: (number | null)[]
+}
+
+// Cached slideshow image (album art / station logo) attached at runtime only
+// — never part of the persisted DabStationRef shape.
+type DabStationView = DabStationRef & { imageUrl?: string }
+
+type DabState = {
+  running: boolean
+  scanning: boolean
+  scanningChannel: string | null
+  stations: DabStationView[]
+  currentStation: DabStationView | null
+  favorites: (DabStationView | null)[]
 }
 
 type MediaPayload = {
@@ -153,6 +166,15 @@ declare global {
         setFavorite(slot: number): Promise<RadioState>
         recallFavorite(slot: number): Promise<RadioState>
         onEvent(callback: (event: unknown, ...args: unknown[]) => void): () => void
+
+        dab: {
+          scan(): Promise<DabState>
+          selectStation(station: DabStationRef): Promise<DabState>
+          stop(): Promise<DabState>
+          getState(): Promise<DabState>
+          setFavorite(slot: number): Promise<DabState>
+          recallFavorite(slot: number): Promise<DabState>
+        }
       }
 
       settings: {

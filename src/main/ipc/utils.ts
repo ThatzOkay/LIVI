@@ -60,7 +60,11 @@ export function saveSettings(runtimeState: runtimeStateProps, next: Partial<Conf
       ...DEFAULT_BINDINGS,
       ...(runtimeState.config.bindings ?? {}),
       ...(next.bindings ?? {})
-    }
+    },
+    // RadioService and DabService each persist their own slice of `radio`
+    // (FM tuning state vs. DAB favorites) independently — a shallow merge
+    // here would let one overwrite the other's already-saved fields.
+    ...(next.radio && { radio: { ...runtimeState.config.radio, ...next.radio } })
   } as Config
 
   applyNullDeletes(merged, next)

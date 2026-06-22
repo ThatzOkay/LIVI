@@ -1,32 +1,17 @@
 import { configEvents } from '@main/ipc/utils'
-import { AudioOutput } from '@main/services/audio'
-import type { Config, RadioConfig } from '@shared/types'
+import type { Config, DabStationRef, RadioConfig } from '@shared/types'
 import { BrowserWindow } from 'electron'
+import type { BackendEvent } from './backendEvent'
+import { DabRadio, type DabState } from './DabRadio'
+import { FmRadio, type StationInfo } from './FmRadio'
 
-const SAMPLE_RATE = 2048000
-const OUTPUT_RATE = 48000
-const DEFAULT_FREQUENCY_MHZ = 100.0
-const FAVORITES_SLOTS = 5
-// User-driven frequency changes (stepping/seeking) can fire in quick bursts;
-// debounce the "last frequency" write so each one doesn't hit disk.
+export type { DabState } from './DabRadio'
+export type { StationInfo } from './FmRadio'
+export { FM_BAND_MAX_MHZ, FM_BAND_MIN_MHZ, FM_FAST_STEP_MHZ, FM_STEP_MHZ } from './FmRadio'
+
 const PERSIST_DEBOUNCE_MS = 1000
 
-export const FM_BAND_MIN_MHZ = 87
-export const FM_BAND_MAX_MHZ = 108
-export const FM_STEP_MHZ = 0.05
-export const FM_FAST_STEP_MHZ = 1.0
-
 export type RadioMode = 'fm' | 'dab'
-
-/// Mode-agnostic station metadata. FM populates this from RDS (PI/PS/RT/PTY);
-/// a future DAB mode would populate the same shape from its service label /
-/// dynamic label segment, so IPC/preload/UI consumers don't need to change.
-export type StationInfo = {
-  id: number
-  genre: string
-  name?: string
-  text?: string
-}
 
 export type RadioState = {
   running: boolean
@@ -36,246 +21,126 @@ export type RadioState = {
   favorites: (number | null)[]
 }
 
-type RdsInfoNative = {
-  programId: number
-  programType: string
-  stationName?: string
-  radioText?: string
-}
-
-type FMPipelineLike = {
-  process: (buffer: Buffer) => Float32Array
-  rds: () => RdsInfoNative
-  resetRds: () => void
-}
-
-type RtlSdrAddon = {
-  getDeviceCount: () => number
-  open: (index: number) => number
-  close: () => void
-  setSampleRate: (rate: number) => number
-  setGain: (gain: number) => void
-  setFrequency: (freq: number) => number
-  readAsync: (cb: (buf: Buffer) => void) => void
-  stopAsync: () => void
-  FMPipeline: new (inputRate: number, outputRate: number) => FMPipelineLike
-}
-
-let addon: RtlSdrAddon | null = null
-let loadFailed = false
-
-// Dynamic import (not require()) so a missing/broken native module degrades
-// gracefully via the catch below instead of crashing the app at startup.
-async function load(): Promise<RtlSdrAddon | null> {
-  if (addon || loadFailed) return addon
-  try {
-    addon = (await import('rtl-sdr-fm')) as unknown as RtlSdrAddon
-  } catch (e) {
-    loadFailed = true
-    console.error('[RadioService] native addon load failed:', (e as Error).message)
-  }
-  return addon
-}
-
-function clampFrequency(mhz: number): number {
-  if (mhz > FM_BAND_MAX_MHZ) return FM_BAND_MIN_MHZ
-  if (mhz < FM_BAND_MIN_MHZ) return FM_BAND_MAX_MHZ
-  return Math.round(mhz * 100) / 100
-}
-
-function toStationInfo(r: RdsInfoNative): StationInfo | null {
-  if (r.programId === 0 && !r.stationName && !r.radioText) return null
-  return { id: r.programId, genre: r.programType, name: r.stationName, text: r.radioText }
-}
-
-function stationInfoEqual(a: StationInfo | null, b: StationInfo | null): boolean {
-  if (a === b) return true
-  if (!a || !b) return false
-  return a.id === b.id && a.genre === b.genre && a.name === b.name && a.text === b.text
-}
-
-function floatToInt16(samples: Float32Array): Int16Array {
-  const out = new Int16Array(samples.length)
-  for (let i = 0; i < samples.length; i++) {
-    let v = samples[i]
-    if (v > 1) v = 1
-    else if (v < -1) v = -1
-    out[i] = Math.round(v * 32767)
-  }
-  return out
-}
-
+/**
+ * Thin orchestrator: owns which band is active and delegates playback to
+ * whichever backend (FmRadio / DabRadio) the active mode maps to. Each
+ * backend manages its own hardware/native addon and reports changes back
+ * via a notify callback, so persistence and broadcasting only happen here.
+ */
 class RadioService {
-  private deviceOpen = false
-  private running = false
-  private frequencyMhz = DEFAULT_FREQUENCY_MHZ
   private mode: RadioMode = 'fm'
-  private pipeline: FMPipelineLike | null = null
-  private audioOutput: AudioOutput | null = null
-  private station: StationInfo | null = null
-  private favorites: (number | null)[] = new Array(FAVORITES_SLOTS).fill(null)
   private persistTimer: ReturnType<typeof setTimeout> | null = null
 
-  /** Restores last frequency/mode/favorites from persisted config. Call once at app startup. */
-  hydrate(radio: RadioConfig | undefined): void {
+  private readonly fm = new FmRadio((event) => this.onFmEvent(event))
+  private readonly dab = new DabRadio((event) => this.onDabEvent(event))
+
+  /** Restores last mode + both backends' persisted state. Call once at app startup. */
+  async hydrate(radio: RadioConfig | undefined): Promise<void> {
     if (!radio) return
-    this.frequencyMhz = clampFrequency(radio.lastFrequencyMhz ?? DEFAULT_FREQUENCY_MHZ)
     this.mode = radio.lastMode ?? 'fm'
-    const favorites = Array.isArray(radio.favorites) ? radio.favorites : []
-    this.favorites = Array.from({ length: FAVORITES_SLOTS }, (_, i) => favorites[i] ?? null)
+    this.fm.hydrate(radio)
+    await this.dab.hydrate(radio)
   }
 
   getState(): RadioState {
+    const fm = this.fm.getState()
     return {
-      running: this.running,
-      frequencyMhz: this.frequencyMhz,
+      running: fm.running,
+      frequencyMhz: fm.frequencyMhz,
       mode: this.mode,
-      station: this.station,
-      favorites: this.favorites
+      station: fm.station,
+      favorites: fm.favorites
     }
+  }
+
+  getDabState(): DabState {
+    return this.dab.getState()
   }
 
   setMode(mode: RadioMode): RadioState {
     this.mode = mode
     this.schedulePersist()
-    this.broadcastState()
+    this.broadcastFmState()
     return this.getState()
   }
 
-  getFavorites(): (number | null)[] {
-    return this.favorites
-  }
-
-  /** Saves the current frequency into a preset slot, like holding a button on a real radio. */
-  setFavorite(slot: number): RadioState {
-    if (slot >= 0 && slot < FAVORITES_SLOTS) {
-      this.favorites = this.favorites.map((f, i) => (i === slot ? this.frequencyMhz : f))
-      this.persistNow()
-      this.broadcastState()
-    }
+  // ── FM ───────────────────────────────────────────────────────────────────
+  async startFm(frequencyMhz?: number): Promise<RadioState> {
+    await this.fm.start(frequencyMhz)
     return this.getState()
   }
 
-  /** Tunes to whatever frequency is saved in a preset slot. No-op if the slot is empty. */
-  async recallFavorite(slot: number): Promise<RadioState> {
-    const freq = slot >= 0 && slot < FAVORITES_SLOTS ? this.favorites[slot] : null
-    if (typeof freq === 'number') {
-      if (!this.running) await this.start(freq)
-      else await this.tune(clampFrequency(freq))
-    }
+  async stopFm(): Promise<RadioState> {
+    await this.fm.stop()
     return this.getState()
   }
 
-  async start(frequencyMhz?: number): Promise<RadioState> {
-    if (typeof frequencyMhz === 'number' && Number.isFinite(frequencyMhz)) {
-      this.frequencyMhz = clampFrequency(frequencyMhz)
-    }
-
-    if (this.running) {
-      await this.tune(this.frequencyMhz)
-      return this.getState()
-    }
-
-    const a = await load()
-    if (!a) {
-      this.broadcastError('RTL-SDR addon unavailable')
-      return this.getState()
-    }
-
-    try {
-      if (!this.deviceOpen) {
-        const openResult = a.open(0)
-        if (openResult !== 0) {
-          this.broadcastError('Failed to open RTL-SDR device')
-          return this.getState()
-        }
-        this.deviceOpen = true
-        a.setSampleRate(SAMPLE_RATE)
-        a.setGain(200)
-      }
-
-      a.setFrequency(this.frequencyMhz * 1_000_000)
-
-      this.pipeline = new a.FMPipeline(SAMPLE_RATE, OUTPUT_RATE)
-      this.audioOutput = new AudioOutput({
-        sampleRate: OUTPUT_RATE,
-        channels: 1,
-        mode: 'realtime'
-      })
-      this.audioOutput.start()
-
-      a.readAsync((buf: Buffer) => {
-        if (!this.running || !this.pipeline || !this.audioOutput) return
-        const audio = this.pipeline.process(buf)
-        this.audioOutput.write(floatToInt16(audio))
-
-        const station = toStationInfo(this.pipeline.rds())
-        if (!stationInfoEqual(this.station, station)) {
-          this.station = station
-          this.broadcastState()
-        }
-      })
-
-      this.running = true
-      this.schedulePersist()
-      this.broadcastState()
-    } catch (e) {
-      this.broadcastError((e as Error).message)
-    }
-
+  async setFmFrequency(mhz: number): Promise<RadioState> {
+    await this.fm.setFrequency(mhz)
     return this.getState()
   }
 
-  async stop(): Promise<RadioState> {
-    if (!this.running) return this.getState()
-
-    const a = await load()
-    try {
-      a?.stopAsync()
-      a?.close()
-    } catch (e) {
-      console.error('[RadioService] stop failed:', (e as Error).message)
-    }
-
-    this.deviceOpen = false
-    this.running = false
-    this.pipeline = null
-    this.station = null
-    this.audioOutput?.stop()
-    this.audioOutput = null
-
-    this.broadcastState()
+  async stepFm(direction: 1 | -1, fast: boolean): Promise<RadioState> {
+    await this.fm.step(direction, fast)
     return this.getState()
   }
 
-  async setFrequency(mhz: number): Promise<RadioState> {
-    await this.tune(clampFrequency(mhz))
+  /** A deliberate save action — persisted immediately rather than debounced. */
+  setFmFavorite(slot: number): RadioState {
+    this.fm.setFavorite(slot)
+    this.persistNow()
     return this.getState()
   }
 
-  async step(direction: 1 | -1, fast: boolean): Promise<RadioState> {
-    const delta = (fast ? FM_FAST_STEP_MHZ : FM_STEP_MHZ) * direction
-    await this.tune(clampFrequency(this.frequencyMhz + delta))
+  async recallFmFavorite(slot: number): Promise<RadioState> {
+    await this.fm.recallFavorite(slot)
     return this.getState()
   }
 
-  private async tune(mhz: number): Promise<void> {
-    this.frequencyMhz = mhz
-    if (this.running) {
-      const a = await load()
-      try {
-        a?.setFrequency(mhz * 1_000_000)
-        // A new frequency means a different station — clear stale RDS data
-        // and re-sync the demod chain rather than waiting for it to drift off.
-        this.pipeline?.resetRds()
-        this.station = null
-      } catch (e) {
-        this.broadcastError((e as Error).message)
-        return
-      }
+  // ── DAB ──────────────────────────────────────────────────────────────────
+  async scanDabStations(): Promise<DabState> {
+    await this.dab.scan()
+    return this.getDabState()
+  }
+
+  async selectDabStation(station: DabStationRef): Promise<DabState> {
+    await this.dab.selectStation(station)
+    return this.getDabState()
+  }
+
+  async stopDab(): Promise<DabState> {
+    await this.dab.stop()
+    return this.getDabState()
+  }
+
+  /** A deliberate save action — persisted immediately rather than debounced. */
+  setDabFavorite(slot: number): DabState {
+    this.dab.setFavorite(slot)
+    this.persistNow()
+    return this.getDabState()
+  }
+
+  async recallDabFavorite(slot: number): Promise<DabState> {
+    await this.dab.recallFavorite(slot)
+    return this.getDabState()
+  }
+
+  private onFmEvent(event: BackendEvent): void {
+    if (event.type === 'error') {
+      this.broadcastError(event.message)
+      return
     }
     this.schedulePersist()
-    this.broadcastState()
+    this.broadcastFmState()
+  }
+
+  private onDabEvent(event: BackendEvent): void {
+    if (event.type === 'error') {
+      this.broadcastError(event.message)
+      return
+    }
+    this.schedulePersist()
+    this.broadcastDabState()
   }
 
   /** Debounces writes for high-frequency changes (seeking/stepping). */
@@ -292,10 +157,18 @@ class RadioService {
       clearTimeout(this.persistTimer)
       this.persistTimer = null
     }
+    const fm = this.fm.getState()
+    const dab = this.dab.getState()
     const radio: RadioConfig = {
-      lastFrequencyMhz: this.frequencyMhz,
+      lastFrequencyMhz: fm.frequencyMhz,
       lastMode: this.mode,
-      favorites: this.favorites
+      favorites: fm.favorites,
+      // Strip the runtime-only cached image — config is for lean settings,
+      // not image blobs. The disk image cache is the source of truth and
+      // gets re-attached on the next hydrate().
+      dabFavorites: dab.favorites.map((f) =>
+        f ? { id: f.id, label: f.label, channel: f.channel, frequencyHz: f.frequencyHz } : null
+      )
     }
     try {
       configEvents.emit('requestSave', { radio } satisfies Partial<Config>)
@@ -304,8 +177,13 @@ class RadioService {
     }
   }
 
-  private broadcastState(): void {
+  private broadcastFmState(): void {
     const payload = { type: 'state', state: this.getState() }
+    BrowserWindow.getAllWindows().forEach((win) => win.webContents.send('radio-event', payload))
+  }
+
+  private broadcastDabState(): void {
+    const payload = { type: 'dab-state', state: this.getDabState() }
     BrowserWindow.getAllWindows().forEach((win) => win.webContents.send('radio-event', payload))
   }
 

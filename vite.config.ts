@@ -94,6 +94,7 @@ export default defineConfig({
                 'usb',
                 'gst-video',
                 'rtl-sdr-fm',
+                'rtl-sdr-dab',
                 'node-gyp-build',
                 ...NODE_BUILTINS
               ],

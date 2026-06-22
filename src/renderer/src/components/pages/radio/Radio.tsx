@@ -1,19 +1,29 @@
+import Tab from '@mui/material/Tab'
+import Tabs from '@mui/material/Tabs'
 import { useElementSize, useRadioState } from '../media/hooks'
 import { mediaScaleOps } from '../media/utils/mediaScaleOps'
-import { FavoritesRow, RadioControls } from './components'
+import { DabPanel, FmPanel } from './components'
 
 export const Radio = ({ forceHydrate = true } = {}) => {
   const [rootRef, { w, h }] = useElementSize<HTMLDivElement>()
   const {
     running,
     frequencyMhz,
+    mode,
     station,
     favorites,
     error,
     toggle,
     step,
+    switchMode,
     setFavorite,
-    recallFavorite
+    recallFavorite,
+    dab,
+    scanDabStations,
+    selectDabStation,
+    stopDab,
+    setDabFavorite,
+    recallDabFavorite
   } = useRadioState({ forceHydrate })
 
   // Scales (base) — same proportions as the Media page
@@ -27,6 +37,19 @@ export const Radio = ({ forceHydrate = true } = {}) => {
   const iconMainPx = Math.round(ctrlSize * 0.52)
   const favSize = Math.round(ctrlSize * 0.7)
   const favFontPx = Math.round(favSize * 0.32)
+
+  const tabs = (
+    <div style={{ width: '100%', display: 'flex', justifyContent: 'center' }}>
+      <Tabs
+        value={mode === 'dab' ? 'dab' : 'fm'}
+        onChange={(_e, newMode) => switchMode(newMode)}
+        centered
+      >
+        <Tab label="FM" value="fm" />
+        <Tab label="DAB" value="dab" />
+      </Tabs>
+    </div>
+  )
 
   return (
     <div
@@ -44,90 +67,52 @@ export const Radio = ({ forceHydrate = true } = {}) => {
         overflow: 'hidden'
       }}
     >
-      <div
-        style={{
-          flex: 1,
-          minHeight: 0,
-          display: 'flex',
-          flexDirection: 'column',
-          alignItems: 'center',
-          justifyContent: 'center',
-          gap: sectionGap
-        }}
-      >
-        <div style={{ opacity: 0.7, fontSize: Math.round(titlePx * 0.4), letterSpacing: 2 }}>
-          {station?.name ? station.name.trim() : 'FM RADIO'}
-        </div>
-
-        <div
-          style={{
-            fontSize: freqPx,
-            fontWeight: 800,
-            lineHeight: 1,
-            letterSpacing: 0.5
-          }}
-        >
-          {frequencyMhz.toFixed(2)}
-          <span style={{ fontSize: Math.round(freqPx * 0.32), opacity: 0.7, marginLeft: 8 }}>
-            MHz
-          </span>
-        </div>
-
-        <div style={{ opacity: 0.6, fontSize: Math.round(titlePx * 0.36) }}>
-          {error ? error : running ? 'Playing' : 'Stopped'}
-        </div>
-
-        {station?.text && (
-          <div
-            style={{
-              opacity: 0.55,
-              fontSize: Math.round(titlePx * 0.32),
-              maxWidth: '80%',
-              textAlign: 'center',
-              overflow: 'hidden',
-              textOverflow: 'ellipsis',
-              whiteSpace: 'nowrap'
-            }}
-          >
-            {station.text.trim()}
-          </div>
-        )}
-      </div>
-
-      <div
-        style={{
-          display: 'grid',
-          gridAutoRows: 'auto',
-          rowGap: isTinyHeight ? 8 : 10,
-          paddingBottom: isTinyHeight ? 6 : '1rem',
-          width: '100%',
-          boxSizing: 'border-box'
-        }}
-      >
-        <RadioControls
+      {mode === 'dab' ? (
+        <DabPanel
+          tabs={tabs}
+          titlePx={titlePx}
+          sectionGap={sectionGap}
+          isTinyHeight={isTinyHeight}
           ctrlGap={ctrlGap}
           ctrlSize={ctrlSize}
+          iconMainPx={iconMainPx}
+          favSize={favSize}
+          favFontPx={favFontPx}
+          dab={dab}
+          error={error}
+          onScan={scanDabStations}
+          onSelectStation={selectDabStation}
+          onStop={stopDab}
+          onRecallFavorite={recallDabFavorite}
+          onSaveFavorite={setDabFavorite}
+        />
+      ) : (
+        <FmPanel
+          tabs={tabs}
+          titlePx={titlePx}
+          freqPx={freqPx}
+          sectionGap={sectionGap}
+          isTinyHeight={isTinyHeight}
+          frequencyMhz={frequencyMhz}
+          station={station}
           running={running}
+          error={error}
+          ctrlGap={ctrlGap}
+          ctrlSize={ctrlSize}
+          iconPx={iconPx}
+          iconMainPx={iconMainPx}
+          favSize={favSize}
+          favFontPx={favFontPx}
+          favorites={favorites}
           onFastBack={() => step(-1, true)}
           onStepBack={() => step(-1, false)}
           onTogglePlay={toggle}
           onStepForward={() => step(1, false)}
           onFastForward={() => step(1, true)}
-          iconPx={iconPx}
-          iconMainPx={iconMainPx}
-        />
-
-        <FavoritesRow
-          ctrlGap={ctrlGap}
-          size={favSize}
-          fontPx={favFontPx}
-          favorites={favorites}
-          running={running}
-          activeFrequencyMhz={frequencyMhz}
           onRecall={recallFavorite}
           onSave={setFavorite}
         />
-      </div>
+      )}
     </div>
   )
 }

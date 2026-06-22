@@ -1,5 +1,6 @@
 packages:
   - native/gst-video
+  - native/rtl-sdr-dab
   - native/rtl-sdr-fm
 overrides:
   # @electron/rebuild bundles node-gyp 11.5.0, which cannot detect VS2026 on the

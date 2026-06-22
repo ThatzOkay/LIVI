@@ -65,6 +65,7 @@
     "protobufjs": "^8.6.4",
     "react-i18next": "^17.0.8",
     "react-router": "^8.0.1",
+    "rtl-sdr-dab": "workspace:*",
     "rtl-sdr-fm": "workspace:*",
     "socket.io": "^4.8.3",
     "stream-browserify": "^3.0.0",
@@ -113,6 +114,7 @@
   },
   "workspaces": [
     "native/gst-video",
+    "native/rtl-sdr-dab",
     "native/rtl-sdr-fm"
   ],
   "overrides": {
