@@ -1,6 +1,6 @@
 {
   "name": "LIVI",
-  "version": "7.1.1",
+  "version": "7.2.0",
   "description": "LIVI - Linux In-Vehicle Infotainment",
   "desktopName": "dev.f-io.livi.desktop",
   "main": "./out/main/main.js",
@@ -10,6 +10,7 @@
     "Lasse Heitgres"
   ],
   "homepage": "https://f-io.dev",
+  "license": "GPL-3.0-or-later",
   "packageManager": "pnpm@11.8.0",
   "scripts": {
     "prepare": "husky",
@@ -27,13 +28,11 @@
     "build": "pnpm run typecheck && pnpm run build:app",
     "build:compositor:linux": "bash scripts/compositor/build-linux.sh",
     "postinstall": "electron-builder install-app-deps",
-    "build:mac": "pnpm run build:app && bash scripts/gstreamer/package-macos.sh --relocate-node && electron-builder --mac --arm64 --publish never --config",
-    "build:linux": "pnpm run build:app && pnpm run build:compositor:linux && electron-builder --linux AppImage deb --publish never --config",
-    "build:linux:appimage": "pnpm run build:app && pnpm run build:compositor:linux && electron-builder --linux AppImage --publish never --config",
-    "build:linux:deb": "pnpm run build:app && pnpm run build:compositor:linux && electron-builder --linux deb --publish never --config",
-    "build:armLinux": "pnpm run build:app && pnpm run build:compositor:linux && electron-builder --linux AppImage deb --arm64 --publish never --config",
-    "build:armLinux:appimage": "pnpm run build:app && pnpm run build:compositor:linux && electron-builder --linux AppImage --arm64 --publish never --config",
-    "build:armLinux:deb": "pnpm run build:app && pnpm run build:compositor:linux && electron-builder --linux deb --arm64 --publish never --config",
+    "build:mac": "pnpm run build:mac:arm64",
+    "build:mac:arm64": "pnpm run build:app && bash scripts/gstreamer/package-macos.sh --relocate-node && electron-builder --mac --arm64 --publish never --config",
+    "build:mac:x64": "pnpm run build:app && bash scripts/gstreamer/package-macos.sh --relocate-node && electron-builder --mac --x64 --publish never --config",
+    "build:linux": "pnpm run build:app && pnpm run build:compositor:linux && electron-builder --linux AppImage --publish never --config",
+    "build:armLinux": "pnpm run build:app && pnpm run build:compositor:linux && electron-builder --linux AppImage --arm64 --publish never --config",
     "build:win": "pnpm run build && electron-builder --win --publish never --config",
     "test": "vitest run",
     "test:main": "vitest run --project main",
@@ -75,6 +74,7 @@
   },
   "optionalDependencies": {
     "@node-usb/usb-darwin-arm64": "3.0.0",
+    "@node-usb/usb-darwin-x64": "3.0.0",
     "@node-usb/usb-linux-arm64-gnu": "3.0.0",
     "@node-usb/usb-linux-x64-gnu": "3.0.0",
     "@node-usb/usb-win32-x64-msvc": "3.0.0"

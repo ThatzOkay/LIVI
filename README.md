@@ -66,7 +66,7 @@ _This install script is not actively tested on other Linux distributions._
 
 ## Linux (x86_64)
 
-This AppImage has been tested on Debian Trixie (13) with Wayland, Ubuntu 26.04 and Fedora 44 (GMNOME).
+This AppImage has been tested on Debian Trixie (13) with Wayland, Fedora 44 (GNOME) and Ubuntu 26.04.
 
 ```bash
 chmod +x LIVI-*-x86_64.AppImage
@@ -181,20 +181,15 @@ pnpm run install:ci
 
 # --- Build targets ---
 
-# Linux x86_64 (AppImage + deb)
+# Linux x86_64 (AppImage)
 pnpm run build:linux
 
-# Linux ARM64 (AppImage + deb)
+# Linux ARM64 (AppImage)
 pnpm run build:armLinux
 
-# Single-format variants
-pnpm run build:linux:appimage      # x86_64 AppImage
-pnpm run build:linux:deb           # x86_64 deb
-pnpm run build:armLinux:appimage   # ARM64 AppImage
-pnpm run build:armLinux:deb        # ARM64 deb
-
-# macOS (arm64 dmg)
-pnpm run build:mac
+# macOS (dmg)
+pnpm run build:mac:arm64           # Apple Silicon
+pnpm run build:mac:x64             # Intel
 ```
 
 ## Dashboard
@@ -283,4 +278,8 @@ _Apple and CarPlay are trademarks of Apple Inc. Android and Android Auto are tra
 
 ## License
 
-This project is licensed under the MIT License.
+LIVI is free software, licensed under the **GNU General Public License v3.0 or later** (`GPL-3.0-or-later`). See [LICENSE](LICENSE) for the full text.
+
+Copyright (C) 2025 Lasse Heitgres
+
+You are free to use, study, share, and modify LIVI. If you distribute it or a modified version, you must pass on the same freedoms and make the corresponding source available under the GPL. It comes with NO WARRANTY, to the extent permitted by law.

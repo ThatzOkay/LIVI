@@ -18,16 +18,12 @@ on:
         description: 'Build Linux arm64'
         type: boolean
         default: true
-      linux_packages:
-        description: 'Linux package type'
-        type: choice
-        options:
-          - all
-          - AppImage
-          - deb
-        default: 'all'
       macos_arm64:
         description: 'Build macOS arm64 (dmg)'
+        type: boolean
+        default: true
+      macos_x64:
+        description: 'Build macOS x64 (dmg)'
         type: boolean
         default: true
       windows_x64:
@@ -54,8 +50,8 @@ jobs:
           EVENT_NAME: ${{ github.event_name }}
           IN_LINUX_X64: ${{ inputs.linux_x64 }}
           IN_LINUX_ARM64: ${{ inputs.linux_arm64 }}
-          IN_LINUX_PACKAGES: ${{ inputs.linux_packages }}
           IN_MACOS_ARM64: ${{ inputs.macos_arm64 }}
+          IN_MACOS_X64: ${{ inputs.macos_x64 }}
           IN_WINDOWS_X64: ${{ inputs.windows_x64 }}
         run: |
           set -euo pipefail
@@ -70,29 +66,29 @@ jobs:
           const inputs = {
             linux_x64: isTrue(process.env.IN_LINUX_X64),
             linux_arm64: isTrue(process.env.IN_LINUX_ARM64),
-            linux_packages: process.env.IN_LINUX_PACKAGES || 'all',
             macos_arm64: isTrue(process.env.IN_MACOS_ARM64),
+            macos_x64: isTrue(process.env.IN_MACOS_X64),
             windows_x64: isTrue(process.env.IN_WINDOWS_X64),
           };
 
           const include = [];
-          const add = (os, runner, arch, artifact_ext, lpkg = 'all') => {
-            include.push({ os, runner, arch, artifact_ext, lpkg });
+          const add = (os, runner, arch, artifact_ext) => {
+            include.push({ os, runner, arch, artifact_ext });
           };
-
-          const linuxExt = inputs.linux_packages === 'all' ? 'AppImage+deb' : inputs.linux_packages;
 
           if (eventName === 'workflow_run') {
             // main: always build everything
-            add('linux', 'ubuntu-latest', 'x64', 'AppImage+deb');
-            add('linux', 'ubuntu-24.04-arm', 'arm64', 'AppImage+deb');
+            add('linux', 'ubuntu-latest', 'x64', 'AppImage');
+            add('linux', 'ubuntu-24.04-arm', 'arm64', 'AppImage');
             add('macos', 'macos-latest', 'arm64', 'dmg');
+            add('macos', 'macos-latest', 'x64', 'dmg');
             add('windows', 'windows-2025-vs2026', 'x64', 'exe');
           } else {
             // manual: only selected
-            if (inputs.linux_x64) add('linux', 'ubuntu-latest', 'x64', linuxExt, inputs.linux_packages);
-            if (inputs.linux_arm64) add('linux', 'ubuntu-24.04-arm', 'arm64', linuxExt, inputs.linux_packages);
+            if (inputs.linux_x64) add('linux', 'ubuntu-latest', 'x64', 'AppImage');
+            if (inputs.linux_arm64) add('linux', 'ubuntu-24.04-arm', 'arm64', 'AppImage');
             if (inputs.macos_arm64) add('macos', 'macos-latest', 'arm64', 'dmg');
+            if (inputs.macos_x64) add('macos', 'macos-latest', 'x64', 'dmg');
             if (inputs.windows_x64) add('windows', 'windows-2025-vs2026', 'x64', 'exe');
           }
 
@@ -220,11 +216,7 @@ jobs:
           npx --yes node-gyp install --target="$ELECTRON_VERSION" --dist-url=https://artifacts.electronjs.org/headers/dist
           pnpm run typecheck
           rm -rf dist
-          case "${{ matrix.lpkg }}" in
-            AppImage) pnpm run build:linux:appimage ;;
-            deb)      pnpm run build:linux:deb ;;
-            *)        pnpm run build:linux ;;
-          esac
+          pnpm run build:linux
 
       # ----------------------------
       # Linux arm64
@@ -259,17 +251,13 @@ jobs:
           npx --yes node-gyp install --target="$ELECTRON_VERSION" --dist-url=https://artifacts.electronjs.org/headers/dist
           pnpm run typecheck
           rm -rf dist
-          case "${{ matrix.lpkg }}" in
-            AppImage) pnpm run build:armLinux:appimage ;;
-            deb)      pnpm run build:armLinux:deb ;;
-            *)        pnpm run build:armLinux ;;
-          esac
+          pnpm run build:armLinux
 
       # ----------------------------
       # macOS arm64
       # ----------------------------
       - name: Install deps (brew) [macos-arm64]
-        if: matrix.os == 'macos' && matrix.arch == 'arm64'
+        if: matrix.os == 'macos'
         shell: bash
         env:
           HOMEBREW_NO_AUTO_UPDATE: '1'
@@ -283,7 +271,7 @@ jobs:
       # (devel = headers + pkg-config, runtime = the dylibs to link against)
       - name: Resolve GStreamer version [macos-arm64]
         id: gstver_mac
-        if: matrix.os == 'macos' && matrix.arch == 'arm64'
+        if: matrix.os == 'macos'
         shell: bash
         run: |
           set -euo pipefail
@@ -299,7 +287,7 @@ jobs:
 
       - name: Cache GStreamer pkgs [macos-arm64]
         id: gstcache_mac
-        if: matrix.os == 'macos' && matrix.arch == 'arm64'
+        if: matrix.os == 'macos'
         uses: actions/cache@v5
         with:
           path: |
@@ -308,7 +296,7 @@ jobs:
           key: gst-pkg-macos-universal-${{ steps.gstver_mac.outputs.version }}
 
       - name: Download GStreamer pkgs [macos-arm64]
-        if: matrix.os == 'macos' && matrix.arch == 'arm64' && steps.gstcache_mac.outputs.cache-hit != 'true'
+        if: matrix.os == 'macos' && steps.gstcache_mac.outputs.cache-hit != 'true'
         shell: bash
         run: |
           set -euo pipefail
@@ -317,7 +305,7 @@ jobs:
           curl -fL -o gst-devel.pkg "${base}/gstreamer-1.0-devel-${{ steps.gstver_mac.outputs.version }}-universal.pkg"
 
       - name: Install GStreamer (runtime + devel) [macos-arm64]
-        if: matrix.os == 'macos' && matrix.arch == 'arm64'
+        if: matrix.os == 'macos'
         shell: bash
         run: |
           set -euo pipefail
@@ -325,19 +313,24 @@ jobs:
           sudo installer -pkg gst-devel.pkg -target /
 
       - name: Install deps (pnpm) [macos-arm64]
-        if: matrix.os == 'macos' && matrix.arch == 'arm64'
+        if: matrix.os == 'macos'
         shell: bash
         run: pnpm install --frozen-lockfile
 
-      - name: Build for macOS arm64 (native)
-        if: matrix.os == 'macos' && matrix.arch == 'arm64'
+      - name: Build for macOS (arm64 native, x64 cross-compiled)
+        if: matrix.os == 'macos'
         shell: bash
         run: |
           set -euo pipefail
           ELECTRON_VERSION=$(node -p "require('./node_modules/electron/package.json').version")
           npx --yes node-gyp install --target="$ELECTRON_VERSION" --dist-url=https://artifacts.electronjs.org/headers/dist
           pnpm run typecheck
-          pnpm run build:mac
+          if [ "${{ matrix.arch }}" = "x64" ]; then
+            npx --yes electron-builder install-app-deps --arch=x64
+            pnpm run build:mac:x64
+          else
+            pnpm run build:mac:arm64
+          fi
 
       # ----------------------------
       # Windows x64
@@ -443,35 +436,19 @@ jobs:
       # Upload artifacts
       # ----------------------------
       - name: Upload AppImage [linux-x64]
-        if: matrix.os == 'linux' && matrix.arch == 'x64' && matrix.lpkg != 'deb'
+        if: matrix.os == 'linux' && matrix.arch == 'x64'
         uses: actions/upload-artifact@v6
         with:
           name: LIVI-${{ steps.pkg.outputs.version }}-linux-x64.AppImage
           path: dist/*.AppImage
           retention-days: 7
 
-      - name: Upload deb [linux-x64]
-        if: matrix.os == 'linux' && matrix.arch == 'x64' && matrix.lpkg != 'AppImage'
-        uses: actions/upload-artifact@v6
-        with:
-          name: LIVI-${{ steps.pkg.outputs.version }}-linux-x64.deb
-          path: dist/*.deb
-          retention-days: 7
-
       - name: Upload AppImage [linux-arm64]
-        if: matrix.os == 'linux' && matrix.arch == 'arm64' && matrix.lpkg != 'deb'
+        if: matrix.os == 'linux' && matrix.arch == 'arm64'
         uses: actions/upload-artifact@v6
         with:
           name: LIVI-${{ steps.pkg.outputs.version }}-linux-arm64.AppImage
           path: dist/*.AppImage
-          retention-days: 7
-
-      - name: Upload deb [linux-arm64]
-        if: matrix.os == 'linux' && matrix.arch == 'arm64' && matrix.lpkg != 'AppImage'
-        uses: actions/upload-artifact@v6
-        with:
-          name: LIVI-${{ steps.pkg.outputs.version }}-linux-arm64.deb
-          path: dist/*.deb
           retention-days: 7
 
       - name: Upload Artifacts

@@ -10,8 +10,8 @@
       and D-Pad navigation using CPC200-CCPA and CPC200-CCPW dongles.
     </p>
   </description>
-  <metadata_license>MIT</metadata_license>
-  <project_license>MIT</project_license>
+  <metadata_license>FSFAP</metadata_license>
+  <project_license>GPL-3.0-or-later</project_license>
   <developer id="dev.f-io">
     <name>Lasse Heitgres</name>
   </developer>
