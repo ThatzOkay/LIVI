@@ -115,12 +115,16 @@ type DabStationRef = {
   frequencyHz: number
   imageUrl?: string
 }
+type DabProgrammeInfo = { codec: 'DAB' | 'DAB+'; bitrateKbps: number }
 type DabState = {
   running: boolean
   scanning: boolean
   scanningChannel: string | null
   stations: DabStationRef[]
   currentStation: DabStationRef | null
+  selectingStation: DabStationRef | null
+  programmeInfo: DabProgrammeInfo | null
+  dynamicLabel: string | null
   favorites: (DabStationRef | null)[]
 }
 
@@ -189,7 +193,8 @@ const api = {
       setFavorite: (slot: number): Promise<DabState> =>
         ipcRenderer.invoke('radio-dab-set-favorite', slot),
       recallFavorite: (slot: number): Promise<DabState> =>
-        ipcRenderer.invoke('radio-dab-recall-favorite', slot)
+        ipcRenderer.invoke('radio-dab-recall-favorite', slot),
+      resume: (): Promise<DabState> => ipcRenderer.invoke('radio-dab-resume')
     }
   },
 

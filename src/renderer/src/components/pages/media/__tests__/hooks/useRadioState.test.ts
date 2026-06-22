@@ -121,7 +121,7 @@ describe('useRadioState', () => {
 
     expect(result.current.running).toBe(false)
     expect(result.current.frequencyMhz).toBe(100.0)
-    expect(result.current.mode).toBe('fm')
+    expect(result.current.mode).toBe('dab')
     expect(result.current.error).toBeNull()
   })
 

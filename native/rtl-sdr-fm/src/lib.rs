@@ -66,11 +66,12 @@ impl FfiDevHandle {
   }
 }
 
-/// Raw IQ chunks are delivered to JS as a plain `(buf: Buffer) => void` callback,
-/// mirroring the old C++ addon's `readAsync`. FM demodulation lives entirely in
-/// [`FmPipeline`] on the JS side of that boundary, so neither side needs to change
-/// when the other does.
-type RawIqCallback = ThreadsafeFunction<Buffer, (), Buffer, Status, false>;
+/// Delivers already-demodulated 16-bit PCM audio to JS, one chunk at a time.
+/// `FmDemod::process()` runs entirely inside the streaming thread (desperado's
+/// tokio task, or librtlsdr's own callback thread for the FFI fallback) before
+/// this fires — JS never runs the DSP itself, it just gets bytes ready to hand
+/// to the audio sink. See `read_async()` for why that distinction matters.
+type AudioCallback = ThreadsafeFunction<Buffer, (), Buffer, Status, false>;
 
 enum ActiveBackend {
   Desperado,
@@ -79,6 +80,16 @@ enum ActiveBackend {
 
 static ACTIVE_BACKEND: Mutex<Option<ActiveBackend>> = Mutex::new(None);
 static FFI_DEV: Mutex<Option<FfiDevHandle>> = Mutex::new(None);
+// set_sample_rate() applies this to the FFI device immediately (no PendingConfig
+// for that backend), so it has to be remembered separately for FmDemod::new()'s
+// input_rate when read_async() later builds the demodulator for this backend.
+static FFI_SAMPLE_RATE: Mutex<u32> = Mutex::new(2_048_000);
+static RDS_STATE: Mutex<RdsInfo> = Mutex::new(RdsInfo {
+  program_id: 0,
+  program_type: String::new(),
+  station_name: None,
+  radio_text: None,
+});
 
 /// Hardware access goes through `desperado`, which bundles device index, sample
 /// rate, gain and frequency into one `RtlSdrConfig` consumed only when streaming
@@ -195,6 +206,7 @@ pub fn close() {
 #[napi]
 pub fn set_sample_rate(rate: u32) -> i32 {
   if matches!(*ACTIVE_BACKEND.lock().unwrap(), Some(ActiveBackend::Ffi)) {
+    *FFI_SAMPLE_RATE.lock().unwrap() = rate;
     return match FFI_DEV.lock().unwrap().as_ref() {
       Some(FfiDevHandle(dev)) => unsafe { librtlsdr_ffi::rtlsdr_set_sample_rate(*dev, rate) },
       None => -1,
@@ -270,8 +282,8 @@ pub fn set_frequency(freq: u32) -> i32 {
 }
 
 /// `desperado::IqAsyncSource` already hands back demodulator-ready `Complex<f32>`
-/// samples; converting back to interleaved cu8 bytes keeps `readAsync`'s JS-facing
-/// contract (and [`FmPipeline::process`]) byte-for-byte unchanged.
+/// samples; converting back to interleaved cu8 bytes lets both backends share
+/// one `FmDemod::process(&[u8])` implementation instead of needing two.
 fn complex_to_cu8(samples: &[Complex<f32>]) -> Vec<u8> {
   let mut bytes = Vec::with_capacity(samples.len() * 2);
   for c in samples {
@@ -281,36 +293,77 @@ fn complex_to_cu8(samples: &[Complex<f32>]) -> Vec<u8> {
   bytes
 }
 
-/// C callback trampoline for the `librtlsdr` fallback: forwards each raw IQ chunk
-/// to the boxed [`RawIqCallback`] passed in as `ctx`.
+/// Converts processed audio samples (already volume-applied and clamped to
+/// [-1, 1] by `FmDemod::process`) into little-endian 16-bit PCM bytes, ready
+/// for `AudioOutput.write()` on the JS side with no further conversion.
+fn f32_to_i16_bytes(samples: &[f32]) -> Vec<u8> {
+  let mut bytes = Vec::with_capacity(samples.len() * 2);
+  for &s in samples {
+    let v = (s.clamp(-1.0, 1.0) * 32767.0).round() as i16;
+    bytes.extend_from_slice(&v.to_le_bytes());
+  }
+  bytes
+}
+
+fn update_rds_state(info: RdsInfo) {
+  *RDS_STATE.lock().unwrap() = info;
+}
+
+/// RDS (station name / radio text) metadata decoded from the same wideband
+/// signal the audio path demodulates, inside the streaming thread. Pulled by
+/// JS via `get_rds()` rather than pushed, since it only changes a few times a
+/// minute — not worth a dedicated callback for.
+#[napi]
+pub fn get_rds() -> RdsInfo {
+  RDS_STATE.lock().unwrap().clone()
+}
+
+/// C callback trampoline for the `librtlsdr` fallback: demodulates each raw
+/// IQ chunk right here (on librtlsdr's own callback thread, never the JS main
+/// thread) and forwards the resulting PCM to the boxed `(AudioCallback,
+/// FmDemod)` passed in as `ctx`.
 extern "C" fn ffi_read_callback(buf: *mut u8, len: u32, ctx: *mut std::os::raw::c_void) {
   if buf.is_null() || len == 0 || ctx.is_null() {
     return;
   }
-  let callback = unsafe { &*(ctx as *const RawIqCallback) };
-  let bytes = unsafe { std::slice::from_raw_parts(buf, len as usize) }.to_vec();
-  callback.call(Buffer::from(bytes), ThreadsafeFunctionCallMode::NonBlocking);
+  let state = unsafe { &mut *(ctx as *mut (AudioCallback, FmDemod)) };
+  let bytes = unsafe { std::slice::from_raw_parts(buf, len as usize) };
+  let audio = state.1.process(bytes);
+  update_rds_state(state.1.rds());
+  state.0.call(Buffer::from(f32_to_i16_bytes(&audio)), ThreadsafeFunctionCallMode::NonBlocking);
 }
 
-/// Starts streaming and delivers each raw IQ chunk to `callback`. Mirrors the old
-/// C++ addon's `readAsync(callback)` — the callback receives interleaved unsigned
-/// 8-bit I/Q bytes, not demodulated audio.
-#[napi(ts_args_type = "callback: (buf: Buffer) => void")]
-pub fn read_async(callback: RawIqCallback) -> Result<()> {
+/// Starts streaming and delivers already-demodulated 16-bit PCM audio to
+/// `callback`, ready to hand straight to the audio sink.
+///
+/// Demodulation (phase extraction, resampling, de-emphasis, stereo/RDS decode)
+/// happens inside the streaming thread set up below — desperado's tokio task,
+/// or librtlsdr's own callback thread for the FFI fallback — never on whatever
+/// thread calls into JS. The previous design called back into JS with raw IQ
+/// bytes and ran the DSP as a synchronous native call from the JS callback,
+/// which in practice meant Electron's main thread: once per IQ chunk, at the
+/// full RTL-SDR sample rate. Under a throttled CPU (a power-saving governor,
+/// or just a weaker SoC like a Raspberry Pi) that synchronous call could fall
+/// behind real-time and block everything else on the main thread for as long
+/// as it took to catch up — audio stutter and an unresponsive UI, same cause.
+#[napi(ts_args_type = "callback: (buf: Buffer) => void, outputRate: number")]
+pub fn read_async(callback: AudioCallback, output_rate: u32) -> Result<()> {
   if matches!(*ACTIVE_BACKEND.lock().unwrap(), Some(ActiveBackend::Ffi)) {
     let dev = match FFI_DEV.lock().unwrap().as_ref() {
       Some(FfiDevHandle(dev)) => FfiDevHandle(*dev),
       None => return Err(Error::from_reason("RTL-SDR device not open")),
     };
+    let input_rate = *FFI_SAMPLE_RATE.lock().unwrap();
+    let demod = FmDemod::new(input_rate, output_rate)?;
 
-    let ctx = Box::into_raw(Box::new(callback)) as usize;
+    let ctx = Box::into_raw(Box::new((callback, demod))) as usize;
     thread::spawn(move || {
       let dev = dev.ptr();
       let ctx = ctx as *mut std::os::raw::c_void;
       unsafe {
         librtlsdr_ffi::rtlsdr_reset_buffer(dev);
         librtlsdr_ffi::rtlsdr_read_async(dev, ffi_read_callback, ctx, 0, 0);
-        drop(Box::from_raw(ctx as *mut RawIqCallback));
+        drop(Box::from_raw(ctx as *mut (AudioCallback, FmDemod)));
       }
     });
 
@@ -329,6 +382,7 @@ pub fn read_async(callback: RawIqCallback) -> Result<()> {
     pending.sample_rate,
     pending.gain,
   );
+  let mut demod = FmDemod::new(pending.sample_rate, output_rate)?;
 
   let (cmd_tx, mut cmd_rx) = tokio::sync::mpsc::unbounded_channel::<StreamCommand>();
   *CMD_TX.lock().unwrap() = Some(cmd_tx);
@@ -355,8 +409,11 @@ pub fn read_async(callback: RawIqCallback) -> Result<()> {
         tokio::select! {
           sample = reader.next() => match sample {
             Some(Ok(samples)) => {
+              let bytes = complex_to_cu8(&samples);
+              let audio = demod.process(&bytes);
+              update_rds_state(demod.rds());
               callback.call(
-                Buffer::from(complex_to_cu8(&samples)),
+                Buffer::from(f32_to_i16_bytes(&audio)),
                 ThreadsafeFunctionCallMode::NonBlocking,
               );
             }
@@ -371,6 +428,11 @@ pub fn read_async(callback: RawIqCallback) -> Result<()> {
               if let Err(e) = reader.tune(freq) {
                 eprintln!("[rtl-sdr] tune failed: {e}");
               }
+              // A new frequency means a different station — the previous
+              // one's decoded RDS state must not linger. Handled here,
+              // atomically with the retune itself, instead of needing a
+              // separate JS-driven resetRds() call racing against it.
+              demod.reset_rds();
             }
             Some(StreamCommand::Stop) | None => break,
           },
@@ -399,8 +461,9 @@ pub fn stop_async() {
 }
 
 /// RDS (station name / radio text) metadata decoded from the same wideband
-/// signal the audio path demodulates. Pulled by JS via [`FmPipeline::rds`]
-/// rather than pushed, since it only changes a few times a minute.
+/// signal the audio path demodulates. Pulled by JS via [`get_rds`] rather
+/// than pushed, since it only changes a few times a minute.
+#[derive(Clone)]
 #[napi(object)]
 pub struct RdsInfo {
   pub program_id: u32,
@@ -410,11 +473,12 @@ pub struct RdsInfo {
 }
 
 /// FM demodulation pipeline: phase-difference demodulation, adaptive resampling
-/// down to the output rate, then de-emphasis. Exported as `FMPipeline` to match
-/// the old C++ addon's JS-facing class name (`#[napi(js_name)]` below) — `clippy`
-/// flags `FMPipeline` itself as an upper-case-acronym struct name.
-#[napi(js_name = "FMPipeline")]
-pub struct FmPipeline {
+/// down to the output rate, then de-emphasis. Deliberately *not* exposed to
+/// JS (no `#[napi]` here) — every instance lives entirely inside the
+/// streaming thread `read_async()` sets up and is never touched from JS, so
+/// per-chunk DSP cost never lands on Electron's main thread. See
+/// `read_async()`'s doc comment for why that distinction was worth making.
+struct FmDemod {
   extractor: PhaseExtractor,
   resampler: AdaptiveResampler,
   deemph: DeemphasisFilter,
@@ -433,7 +497,7 @@ pub struct FmPipeline {
   rds: RdsDecoder,
 }
 
-impl FmPipeline {
+impl FmDemod {
   // 171 kHz gives exactly 3 samples per 2375 Hz RDS symbol (matches redsea/fmradio's
   // own CLI architecture), independent of the FM audio output rate.
   const RDS_TARGET_RATE: f32 = 171_000.0;
@@ -447,12 +511,8 @@ impl FmPipeline {
     rds.set_print_json_output(false);
     rds
   }
-}
 
-#[napi]
-impl FmPipeline {
-  #[napi(constructor)]
-  pub fn new(input_rate: u32, output_rate: u32) -> Result<Self> {
+  fn new(input_rate: u32, output_rate: u32) -> Result<Self> {
     let ratio = output_rate as f64 / input_rate as f64;
     let resampler = AdaptiveResampler::new(ratio, 1, 1).map_err(Error::from_reason)?;
 
@@ -474,19 +534,17 @@ impl FmPipeline {
   }
 
   /// Clears decoded RDS state (PI/PS/RT/PTY) and re-syncs the stereo pilot PLL and
-  /// RDS demod chain. Call this after retuning — a new frequency means a different
-  /// station, so the old station's RDS data must not linger.
-  #[napi]
-  pub fn reset_rds(&mut self) {
+  /// RDS demod chain. Called automatically by the streaming loop on every retune —
+  /// a new frequency means a different station, so the old station's RDS data
+  /// must not linger.
+  fn reset_rds(&mut self) {
     self.mpx_decimator = Decimator::new(self.decim_factor);
     self.stereo = StereoDecoderPLL::new(self.mpx_rate);
     self.rds_resampler = RdsResamplerCustom::new(self.mpx_rate, Self::RDS_TARGET_RATE);
     self.rds = Self::new_rds_decoder();
   }
 
-  #[napi]
-  pub fn process(&mut self, buf: Buffer) -> Float32Array {
-    let bytes: &[u8] = &buf;
+  fn process(&mut self, bytes: &[u8]) -> Vec<f32> {
     let n = bytes.len() / 2;
     let mut iq: Vec<Complex<f32>> = Vec::with_capacity(n);
     for i in 0..n {
@@ -519,11 +577,10 @@ impl FmPipeline {
       *a = (*a * self.volume).clamp(-1.0, 1.0);
     }
 
-    Float32Array::new(audio)
+    audio
   }
 
-  #[napi]
-  pub fn rds(&self) -> RdsInfo {
+  fn rds(&self) -> RdsInfo {
     RdsInfo {
       program_id: self.rds.program_id() as u32,
       program_type: self.rds.program_type(),

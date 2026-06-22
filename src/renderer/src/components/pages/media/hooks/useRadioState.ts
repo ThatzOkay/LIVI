@@ -1,5 +1,13 @@
 import { useCallback, useEffect, useRef, useState } from 'react'
 
+// Switching away from DAB releases the RTL-SDR (a real USB teardown) right
+// before FM's start() tries to reclaim the same tuner. Starting FM the
+// instant stopDab() resolves was observed to stutter/lock up under CPU
+// power-saving governors — the device hand-off and FM's own native init
+// land in the same burst of CPU demand right as the CPU is still ramping up
+// from idle. A short pause between the two gives it room to catch up.
+const FM_RESUME_AFTER_DAB_DELAY_MS = 500
+
 export type RadioMode = 'fm' | 'dab'
 
 export type StationInfo = {
@@ -29,12 +37,22 @@ export type DabStationRef = {
   imageUrl?: string
 }
 
+export type DabProgrammeInfo = { codec: 'DAB' | 'DAB+'; bitrateKbps: number }
+
 export type DabHookState = {
   running: boolean
   scanning: boolean
   scanningChannel: string | null
   stations: DabStationRef[]
   currentStation: DabStationRef | null
+  // The station a selectDabStation()/recallDabFavorite() call is currently
+  // tuning to — null once it settles. Drives a loading indicator so a
+  // multi-second retune doesn't look like nothing happened.
+  selectingStation: DabStationRef | null
+  programmeInfo: DabProgrammeInfo | null
+  // DAB+'s Dynamic Label Segment — its equivalent of FM RDS RadioText, the
+  // current track/show info. null for plain DAB services, which don't carry it.
+  dynamicLabel: string | null
   favorites: (DabStationRef | null)[]
 }
 
@@ -55,7 +73,7 @@ type RadioEventPayload =
 const DEFAULT_STATE: RadioHookState = {
   running: false,
   frequencyMhz: 100.0,
-  mode: 'fm',
+  mode: 'dab',
   station: null,
   favorites: [null, null, null, null, null],
   error: null
@@ -67,6 +85,9 @@ const DEFAULT_DAB_STATE: DabHookState = {
   scanningChannel: null,
   stations: [],
   currentStation: null,
+  selectingStation: null,
+  programmeInfo: null,
+  dynamicLabel: null,
   favorites: [null, null, null, null, null]
 }
 
@@ -206,22 +227,39 @@ export function useRadioState({ forceHydrate = false } = {}) {
     }
   }, [])
 
-  // Switching bands must stop whichever was playing first — otherwise the
-  // previous band keeps playing under the newly selected tab's label. FM then
-  // autostarts (it always has a frequency to resume); DAB has no pipeline
-  // running until the user scans/selects/recalls a station, so it stays idle.
+  // Resumes whichever station was last selected (persisted across restarts
+  // and mode switches) — mirrors start()'s frequency resume for FM. A no-op
+  // if nothing was ever selected.
+  const resumeDabStation = useCallback(async () => {
+    try {
+      const result = await window.projection.radio.dab.resume()
+      setDab(result)
+    } catch (e) {
+      setState((s) => ({ ...s, error: String(e) }))
+    }
+  }, [])
+
+  // Switching bands must release whichever device the previous band held —
+  // otherwise the new band's start() fights it for the same USB tuner. FM's
+  // deviceOpen always tracks running, so checking running is enough there.
+  // DAB can leave its device open (fast-resume after a scan) even while
+  // running is false, so stopDab() must always run unconditionally — it's a
+  // safe no-op when nothing is open. FM then autostarts (it always has a
+  // frequency to resume); DAB likewise resumes its last selected station.
   const switchMode = useCallback(
     async (mode: RadioMode) => {
       if (mode === 'dab') {
         if (state.running) await stop()
         await setMode(mode)
+        await resumeDabStation()
       } else {
-        if (dab.running) await stopDab()
+        await stopDab()
         await setMode(mode)
+        await new Promise((resolve) => setTimeout(resolve, FM_RESUME_AFTER_DAB_DELAY_MS))
         await start()
       }
     },
-    [state.running, dab.running, stop, stopDab, setMode, start]
+    [state.running, stop, stopDab, setMode, start, resumeDabStation]
   )
 
   const startedRef = useRef(false)
@@ -236,6 +274,7 @@ export function useRadioState({ forceHydrate = false } = {}) {
     void window.projection.radio.getState().then((result) => {
       setState((s) => ({ ...s, ...result, error: null }))
       if (result.mode === 'fm') void start()
+      else void resumeDabStation()
     })
 
     return () => {
@@ -263,6 +302,7 @@ export function useRadioState({ forceHydrate = false } = {}) {
     selectDabStation,
     stopDab,
     setDabFavorite,
-    recallDabFavorite
+    recallDabFavorite,
+    resumeDabStation
   }
 }

@@ -95,6 +95,9 @@ export type RadioConfig = {
   // 5 quick-access presets, like a real radio. `null` = empty slot.
   favorites: (number | null)[]
   dabFavorites?: (DabStationRef | null)[]
+  // The last station actively selected/playing, restored on the next DAB
+  // autostart the same way lastFrequencyMhz resumes FM.
+  lastDabStation?: DabStationRef | null
 }
 
 export type AppearanceMode = 'auto' | 'night' | 'day'

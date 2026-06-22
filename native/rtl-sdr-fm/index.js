@@ -587,11 +587,10 @@ if (!nativeBinding) {
 }
 
 module.exports = nativeBinding
-module.exports.FMPipeline = nativeBinding.FMPipeline
-module.exports.FmPipeline = nativeBinding.FmPipeline
 module.exports.close = nativeBinding.close
 module.exports.getDeviceCount = nativeBinding.getDeviceCount
 module.exports.getDeviceName = nativeBinding.getDeviceName
+module.exports.getRds = nativeBinding.getRds
 module.exports.open = nativeBinding.open
 module.exports.readAsync = nativeBinding.readAsync
 module.exports.setFrequency = nativeBinding.setFrequency

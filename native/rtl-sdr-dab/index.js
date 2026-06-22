@@ -142,6 +142,17 @@ class DabRadio extends EventEmitter {
   }
 
   /**
+   * Looks up the codec (DAB/DAB+) and effective bitrate for a service's
+   * audio component. Only meaningful once that service has actually been
+   * selected and synced — returns null otherwise.
+   * @param {number} serviceId
+   * @returns {{ codec: 'DAB' | 'DAB+', bitrateKbps: number } | null}
+   */
+  getProgrammeInfo(serviceId) {
+    return this.#addon.getProgrammeInfo(serviceId)
+  }
+
+  /**
    * Sweeps every Band III DAB channel, collecting whatever services each
    * ensemble announces, to build up a station list. DAB has no concept of
    * tuning to an arbitrary frequency and hoping for the best — you pick a

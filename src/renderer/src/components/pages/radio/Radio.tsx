@@ -45,8 +45,8 @@ export const Radio = ({ forceHydrate = true } = {}) => {
         onChange={(_e, newMode) => switchMode(newMode)}
         centered
       >
-        <Tab label="FM" value="fm" />
         <Tab label="DAB" value="dab" />
+        <Tab label="FM" value="fm" />
       </Tabs>
     </div>
   )

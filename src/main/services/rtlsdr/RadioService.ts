@@ -28,7 +28,7 @@ export type RadioState = {
  * via a notify callback, so persistence and broadcasting only happen here.
  */
 class RadioService {
-  private mode: RadioMode = 'fm'
+  private mode: RadioMode = 'dab'
   private persistTimer: ReturnType<typeof setTimeout> | null = null
 
   private readonly fm = new FmRadio((event) => this.onFmEvent(event))
@@ -37,7 +37,7 @@ class RadioService {
   /** Restores last mode + both backends' persisted state. Call once at app startup. */
   async hydrate(radio: RadioConfig | undefined): Promise<void> {
     if (!radio) return
-    this.mode = radio.lastMode ?? 'fm'
+    this.mode = radio.lastMode ?? 'dab'
     this.fm.hydrate(radio)
     await this.dab.hydrate(radio)
   }
@@ -125,6 +125,12 @@ class RadioService {
     return this.getDabState()
   }
 
+  /** Resumes whatever DAB station was last playing — call once at startup, like startFm's frequency resume. */
+  async resumeDab(): Promise<DabState> {
+    await this.dab.autoResume()
+    return this.getDabState()
+  }
+
   private onFmEvent(event: BackendEvent): void {
     if (event.type === 'error') {
       this.broadcastError(event.message)
@@ -159,6 +165,7 @@ class RadioService {
     }
     const fm = this.fm.getState()
     const dab = this.dab.getState()
+    const lastDabStation = this.dab.getLastStation()
     const radio: RadioConfig = {
       lastFrequencyMhz: fm.frequencyMhz,
       lastMode: this.mode,
@@ -168,7 +175,18 @@ class RadioService {
       // gets re-attached on the next hydrate().
       dabFavorites: dab.favorites.map((f) =>
         f ? { id: f.id, label: f.label, channel: f.channel, frequencyHz: f.frequencyHz } : null
-      )
+      ),
+      // Read from getLastStation(), not dab.currentStation — the latter is
+      // cleared by stop() (e.g. switching to FM), which would otherwise
+      // wipe out what to resume next time DAB starts.
+      lastDabStation: lastDabStation
+        ? {
+            id: lastDabStation.id,
+            label: lastDabStation.label,
+            channel: lastDabStation.channel,
+            frequencyHz: lastDabStation.frequencyHz
+          }
+        : null
     }
     try {
       configEvents.emit('requestSave', { radio } satisfies Partial<Config>)

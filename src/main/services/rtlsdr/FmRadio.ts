@@ -36,12 +36,6 @@ type RdsInfoNative = {
   radioText?: string
 }
 
-type FMPipelineLike = {
-  process: (buffer: Buffer) => Float32Array
-  rds: () => RdsInfoNative
-  resetRds: () => void
-}
-
 type RtlSdrAddon = {
   getDeviceCount: () => number
   open: (index: number) => number
@@ -49,9 +43,13 @@ type RtlSdrAddon = {
   setSampleRate: (rate: number) => number
   setGain: (gain: number) => void
   setFrequency: (freq: number) => number
-  readAsync: (cb: (buf: Buffer) => void) => void
+  // Delivers already-demodulated 16-bit PCM, ready for AudioOutput.write() —
+  // demodulation runs natively inside the addon's own streaming thread, never
+  // on this (Electron's main) thread. See the addon's read_async() doc
+  // comment for why that distinction matters under a throttled/weaker CPU.
+  readAsync: (cb: (buf: Buffer) => void, outputRate: number) => void
   stopAsync: () => void
-  FMPipeline: new (inputRate: number, outputRate: number) => FMPipelineLike
+  getRds: () => RdsInfoNative
 }
 
 let addon: RtlSdrAddon | null = null
@@ -87,22 +85,10 @@ function stationInfoEqual(a: StationInfo | null, b: StationInfo | null): boolean
   return a.id === b.id && a.genre === b.genre && a.name === b.name && a.text === b.text
 }
 
-function floatToInt16(samples: Float32Array): Int16Array {
-  const out = new Int16Array(samples.length)
-  for (let i = 0; i < samples.length; i++) {
-    let v = samples[i]
-    if (v > 1) v = 1
-    else if (v < -1) v = -1
-    out[i] = Math.round(v * 32767)
-  }
-  return out
-}
-
 export class FmRadio {
   private deviceOpen = false
   private running = false
   private frequencyMhz = DEFAULT_FREQUENCY_MHZ
-  private pipeline: FMPipelineLike | null = null
   private audioOutput: AudioOutput | null = null
   private station: StationInfo | null = null
   private favorites: (number | null)[] = new Array(FAVORITES_SLOTS).fill(null)
@@ -161,6 +147,11 @@ export class FmRadio {
 
     try {
       if (!this.deviceOpen) {
+        // a.open() is a synchronous native call (no AsyncWorker, unlike
+        // rtl-sdr-dab's start/stop/close) — if the USB tuner is still
+        // claimed by DAB, this can block the entire main process JS thread
+        // until libusb gives up or succeeds, which is exactly what an
+        // OS-level "app not responding" looks like.
         const openResult = a.open(0)
         if (openResult !== 0) {
           this.notify({ type: 'error', message: 'Failed to open RTL-SDR device' })
@@ -173,7 +164,6 @@ export class FmRadio {
 
       a.setFrequency(this.frequencyMhz * 1_000_000)
 
-      this.pipeline = new a.FMPipeline(SAMPLE_RATE, OUTPUT_RATE)
       this.audioOutput = new AudioOutput({
         sampleRate: OUTPUT_RATE,
         channels: 1,
@@ -181,17 +171,19 @@ export class FmRadio {
       })
       this.audioOutput.start()
 
+      // buf arrives already demodulated (native-side, off this thread) —
+      // this callback only ever does cheap work: queue it for playback, and
+      // occasionally check whether RDS text changed.
       a.readAsync((buf: Buffer) => {
-        if (!this.running || !this.pipeline || !this.audioOutput) return
-        const audio = this.pipeline.process(buf)
-        this.audioOutput.write(floatToInt16(audio))
+        if (!this.running || !this.audioOutput) return
+        this.audioOutput.write(buf)
 
-        const station = toStationInfo(this.pipeline.rds())
+        const station = toStationInfo(a.getRds())
         if (!stationInfoEqual(this.station, station)) {
           this.station = station
           this.notify({ type: 'change' })
         }
-      })
+      }, OUTPUT_RATE)
 
       this.running = true
       this.notify({ type: 'change' })
@@ -215,7 +207,6 @@ export class FmRadio {
     }
 
     this.running = false
-    this.pipeline = null
     this.station = null
     this.audioOutput?.stop()
     this.audioOutput = null
@@ -237,10 +228,11 @@ export class FmRadio {
     if (this.running && this.deviceOpen) {
       const a = await load()
       try {
+        // The addon resets its own decoded RDS state for us, atomically with
+        // the retune itself (see read_async()'s StreamCommand::Tune handling)
+        // — a new frequency means a different station, so the old one's RDS
+        // text must not linger.
         a?.setFrequency(mhz * 1_000_000)
-        // A new frequency means a different station — clear stale RDS data
-        // and re-sync the demod chain rather than waiting for it to drift off.
-        this.pipeline?.resetRds()
         this.station = null
       } catch (e) {
         this.notify({ type: 'error', message: (e as Error).message })

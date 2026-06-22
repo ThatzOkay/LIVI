@@ -12,12 +12,20 @@ import { DabFavoritesRow } from './dabFavorites'
 type StationTileProps = {
   station: DabStationRef & { imageUrl?: string }
   isActive: boolean
+  isSelecting: boolean
   titlePx: number
   ringColor: string
   onSelect: () => void
 }
 
-const StationTile = ({ station: s, isActive, titlePx, ringColor, onSelect }: StationTileProps) => {
+const StationTile = ({
+  station: s,
+  isActive,
+  isSelecting,
+  titlePx,
+  ringColor,
+  onSelect
+}: StationTileProps) => {
   const [hover, setHover] = useState(false)
   const [pressed, setPressed] = useState(false)
   const hasImage = !!s.imageUrl
@@ -35,33 +43,83 @@ const StationTile = ({ station: s, isActive, titlePx, ringColor, onSelect }: Sta
         if (e.pointerType === 'mouse') setHover(true)
       }}
       aria-pressed={isActive}
-      aria-label={`${s.label.trim() || s.channel}, channel ${s.channel}${isActive ? ', now playing' : ''}`}
+      aria-busy={isSelecting}
+      aria-label={`${s.label.trim() || s.channel}, channel ${s.channel}${isActive ? ', now playing' : ''}${isSelecting ? ', tuning…' : ''}`}
       style={{
         position: 'relative',
         border: 'none',
         borderRadius: 14,
-        aspectRatio: '1.6',
         display: 'flex',
         flexDirection: 'column',
         alignItems: 'flex-start',
         justifyContent: 'flex-end',
-        background: hasImage
-          ? `linear-gradient(to top, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0.25) 60%, rgba(0,0,0,0) 100%), url(${s.imageUrl})`
+        // Plain color fallback, visible while the <img> below loads (or if
+        // there's no image at all) — never a CSS background-image here, see
+        // the <img> below for why.
+        backgroundColor: hasImage
+          ? '#000'
           : hover || pressed
             ? 'rgba(255,255,255,0.14)'
             : 'rgba(255,255,255,0.07)',
-        backgroundSize: 'cover',
-        backgroundPosition: 'center',
         color: hasImage ? '#fff' : 'inherit',
         cursor: 'pointer',
         overflow: 'hidden',
         padding: '6px 8px',
+        opacity: isSelecting ? 0.6 : 1,
         boxShadow: isActive ? `0 0 0 2px ${ringColor}` : '0 0 0 1px rgba(255,255,255,0.08)',
         transform: pressed ? 'scale(0.96)' : 'scale(1)',
-        transition: 'transform 110ms ease, box-shadow 150ms ease, background 150ms ease'
+        transition:
+          'transform 110ms ease, box-shadow 150ms ease, background-color 150ms ease, opacity 150ms ease'
       }}
     >
-      {isActive && (
+      {/* A real <img>, not a CSS background-image — using `background` (the
+          shorthand) here previously meant any re-render that changed its
+          value (e.g. hover toggling the no-image fallback color) silently
+          reset backgroundSize/backgroundPosition to their defaults, since
+          React's diff skips re-applying sibling properties whose value
+          didn't itself change. An <img> has no such shorthand to step on. */}
+      {hasImage && (
+        <img
+          src={s.imageUrl}
+          alt=""
+          style={{
+            position: 'absolute',
+            inset: 0,
+            width: '100%',
+            height: '100%',
+            objectFit: 'cover',
+            zIndex: 0
+          }}
+        />
+      )}
+      {hasImage && (
+        <div
+          style={{
+            position: 'absolute',
+            inset: 0,
+            // Pure gradient, no url() to protect — safe as a shorthand since
+            // there's no sibling backgroundSize/backgroundPosition to lose.
+            background:
+              'linear-gradient(to top, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0.25) 60%, rgba(0,0,0,0) 100%)',
+            zIndex: 1
+          }}
+        />
+      )}
+      {isSelecting && (
+        <CircularProgress
+          size={Math.round(titlePx * 0.5)}
+          sx={{
+            position: 'absolute',
+            top: '50%',
+            left: '50%',
+            marginTop: Math.round(titlePx * -0.25),
+            marginLeft: Math.round(titlePx * -0.25),
+            color: 'inherit',
+            zIndex: 3
+          }}
+        />
+      )}
+      {isActive && !isSelecting && (
         <span
           style={{
             position: 'absolute',
@@ -70,13 +128,16 @@ const StationTile = ({ station: s, isActive, titlePx, ringColor, onSelect }: Sta
             width: 7,
             height: 7,
             borderRadius: '50%',
-            background: ringColor,
-            boxShadow: `0 0 4px ${ringColor}`
+            backgroundColor: ringColor,
+            boxShadow: `0 0 4px ${ringColor}`,
+            zIndex: 3
           }}
         />
       )}
       <span
         style={{
+          position: 'relative',
+          zIndex: 2,
           fontSize: Math.round(titlePx * 0.3),
           fontWeight: 700,
           maxWidth: '100%',
@@ -89,12 +150,14 @@ const StationTile = ({ station: s, isActive, titlePx, ringColor, onSelect }: Sta
       </span>
       <span
         style={{
+          position: 'relative',
+          zIndex: 2,
           fontSize: Math.round(titlePx * 0.2),
           opacity: 0.75,
           marginTop: 2,
           padding: '1px 6px',
           borderRadius: 999,
-          background: hasImage ? 'rgba(0,0,0,0.35)' : 'rgba(255,255,255,0.12)'
+          backgroundColor: hasImage ? 'rgba(0,0,0,0.35)' : 'rgba(255,255,255,0.12)'
         }}
       >
         {s.channel}
@@ -145,7 +208,30 @@ export const DabPanel = ({
   const [hover, setHover] = useState(false)
   const [focus, setFocus] = useState(false)
 
-  const { scanning, scanningChannel, stations, currentStation, running, favorites } = dab
+  const {
+    scanning,
+    scanningChannel,
+    stations,
+    currentStation,
+    selectingStation,
+    programmeInfo,
+    dynamicLabel,
+    running,
+    favorites
+  } = dab
+
+  const statusText = error
+    ? error
+    : scanning
+      ? `Scanning ${scanningChannel ?? ''}…`
+      : selectingStation
+        ? `Tuning to ${selectingStation.label.trim() || selectingStation.channel}…`
+        : running
+          ? programmeInfo
+            ? `Playing · ${programmeInfo.codec} · ${programmeInfo.bitrateKbps} kbps`
+            : 'Playing'
+          : 'Stopped'
+  const showStatusSpinner = !error && (scanning || !!selectingStation)
 
   return (
     <>
@@ -162,31 +248,88 @@ export const DabPanel = ({
       >
         {tabs}
 
-        {currentStation?.imageUrl && (
-          <img
-            src={currentStation.imageUrl}
-            alt=""
+        <div
+          style={{
+            display: 'flex',
+            flexDirection: 'row',
+            alignItems: 'center',
+            gap: 6,
+            boxSizing: 'border-box',
+            padding: '0 1rem'
+          }}
+        >
+          <div
+            data-testid="dab-artwork"
             style={{
               width: Math.round(titlePx * 2.2),
               height: Math.round(titlePx * 2.2),
-              objectFit: 'cover',
-              borderRadius: 8
+              borderRadius: 8,
+              overflow: 'hidden',
+              display: 'flex',
+              alignItems: 'center',
+              justifyContent: 'center',
+              backgroundColor: 'rgba(255,255,255,0.07)'
             }}
-          />
-        )}
+          >
+            {currentStation?.imageUrl ? (
+              <img
+                src={currentStation.imageUrl}
+                alt=""
+                style={{ width: '100%', height: '100%', objectFit: 'cover' }}
+              />
+            ) : (
+              <RadioIcon sx={{ fontSize: Math.round(titlePx * 0.9), opacity: 0.3 }} />
+            )}
+          </div>
 
-        <div style={{ opacity: 0.7, fontSize: Math.round(titlePx * 0.4), letterSpacing: 2 }}>
-          {currentStation?.label?.trim() || 'DAB RADIO'}
+          <div
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              justifyContent: 'center',
+              gap: 2
+            }}
+          >
+            <div style={{ opacity: 0.7, fontSize: Math.round(titlePx * 0.4), letterSpacing: 2 }}>
+              {currentStation?.label?.trim() || 'DAB RADIO'}
+            </div>
+            {running && dynamicLabel && (
+              <div
+                style={{
+                  height: Math.round(titlePx * 0.45),
+                  display: 'flex',
+                  alignItems: 'center'
+                }}
+              >
+                <div
+                  style={{
+                    opacity: 0.55,
+                    fontSize: Math.round(titlePx * 0.32),
+                    overflow: 'hidden',
+                    textOverflow: 'ellipsis',
+                    whiteSpace: 'nowrap'
+                  }}
+                >
+                  {dynamicLabel}
+                </div>
+              </div>
+            )}
+          </div>
         </div>
 
-        <div style={{ opacity: 0.6, fontSize: Math.round(titlePx * 0.36) }}>
-          {error
-            ? error
-            : scanning
-              ? `Scanning ${scanningChannel ?? ''}…`
-              : running
-                ? 'Playing'
-                : 'Stopped'}
+        <div
+          style={{
+            display: 'flex',
+            alignItems: 'center',
+            gap: 6,
+            opacity: 0.6,
+            fontSize: Math.round(titlePx * 0.36)
+          }}
+        >
+          {showStatusSpinner && (
+            <CircularProgress size={Math.round(titlePx * 0.32)} color="inherit" />
+          )}
+          {statusText}
         </div>
 
         <Button
@@ -199,48 +342,53 @@ export const DabPanel = ({
           {scanning ? 'Scanning…' : stations.length > 0 ? 'Scan again' : 'Scan for stations'}
         </Button>
 
-        <div
-          style={{
-            display: 'grid',
-            gridTemplateColumns: 'repeat(4, 1fr)',
-            gap: Math.round(sectionGap * 0.7),
-            width: '100%',
-            maxWidth: 480,
-            maxHeight: '40%',
-            padding: 2,
-            overflowY: 'auto'
-          }}
-        >
-          {stations.length === 0 ? (
-            <div
-              style={{
-                gridColumn: '1 / -1',
-                display: 'flex',
-                flexDirection: 'column',
-                alignItems: 'center',
-                gap: 6,
-                opacity: 0.5,
-                fontSize: Math.round(titlePx * 0.3),
-                textAlign: 'center',
-                padding: '1rem 0'
-              }}
-            >
-              <RadioIcon sx={{ fontSize: Math.round(titlePx * 0.7) }} />
-              {scanning ? 'Listening for ensembles…' : 'No stations yet — tap Scan to search'}
-            </div>
-          ) : (
-            stations.map((s) => (
+        {stations.length === 0 ? (
+          <div
+            style={{
+              display: 'flex',
+              flexDirection: 'column',
+              alignItems: 'center',
+              gap: 6,
+              opacity: 0.5,
+              fontSize: Math.round(titlePx * 0.3),
+              textAlign: 'center',
+              padding: '1rem 0'
+            }}
+          >
+            <RadioIcon sx={{ fontSize: Math.round(titlePx * 0.7) }} />
+            {scanning ? 'Listening for ensembles…' : 'No stations yet — tap Scan to search'}
+          </div>
+        ) : (
+          <div
+            style={{
+              flex: 1,
+              minHeight: 0,
+              width: '100%',
+              display: 'grid',
+              gridAutoFlow: 'column',
+              gridTemplateRows: `repeat(${isTinyHeight ? 2 : 3}, 1fr)`,
+              gridAutoColumns: `minmax(${Math.round(titlePx * 3.4)}px, 1fr)`,
+              gap: Math.round(sectionGap * 0.7),
+              padding: 8,
+              overflowX: 'auto',
+              overflowY: 'hidden'
+            }}
+          >
+            {stations.map((s) => (
               <StationTile
                 key={`${s.channel}:${s.id}`}
                 station={s}
                 isActive={currentStation?.id === s.id && currentStation.channel === s.channel}
+                isSelecting={
+                  selectingStation?.id === s.id && selectingStation?.channel === s.channel
+                }
                 titlePx={titlePx}
                 ringColor={ringColor}
                 onSelect={() => onSelectStation(s)}
               />
-            ))
-          )}
-        </div>
+            ))}
+          </div>
+        )}
       </div>
 
       <div

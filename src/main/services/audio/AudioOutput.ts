@@ -202,6 +202,24 @@ export class AudioOutput {
     fallback.unref?.()
   }
 
+  /**
+   * Same graceful stop as stop(), but resolves once the gst-launch process
+   * has actually exited instead of firing and forgetting. Use this when
+   * something else is about to claim the same audio/USB hardware (e.g.
+   * handing the RTL-SDR tuner from DAB to FM) — without it, the outgoing
+   * process can still be alive and writing to the sink for up to
+   * STOP_GRACE_MS after the caller already considers playback stopped,
+   * overlapping with whatever starts next.
+   */
+  stopAndWait(): Promise<void> {
+    const proc = this.process
+    if (!proc) return Promise.resolve()
+    return new Promise((resolve) => {
+      proc.once('close', () => resolve())
+      this.stop()
+    })
+  }
+
   dispose(): void {
     this.killImmediate()
   }

@@ -35,4 +35,5 @@ export function registerRtlSdrIpc(): void {
   registerIpcHandle('radio-dab-recall-favorite', (_evt, slot: number) =>
     radioService.recallDabFavorite(slot)
   )
+  registerIpcHandle('radio-dab-resume', () => radioService.resumeDab())
 }

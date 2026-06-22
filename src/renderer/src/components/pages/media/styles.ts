@@ -33,14 +33,22 @@ export function circleBtnStyle(size: number, opts: CircleOpts): React.CSSPropert
     alignItems: 'center',
     justifyContent: 'center',
     border: 'none',
-    background,
+    // backgroundColor (longhand), not background (shorthand) — callers like
+    // DabFavoritesRow layer backgroundImage on top of this style. Since
+    // setting the `background` shorthand resets all of its longhand
+    // sub-properties (including background-image) as a CSS side effect,
+    // every hover/press re-render (which recomputes this value) would wipe
+    // out the favorite's artwork the moment it's touched, even though
+    // React's own diff sees backgroundImage as unchanged and never
+    // re-applies it to repair the damage.
+    backgroundColor: background,
     cursor: 'pointer',
     userSelect: 'none',
     WebkitTapHighlightColor: 'transparent',
     lineHeight: 0,
     outline: 'none',
     transform: pressed ? 'scale(0.94)' : 'scale(1)',
-    transition: 'transform 110ms ease, box-shadow 110ms ease, background 110ms ease',
+    transition: 'transform 110ms ease, box-shadow 110ms ease, background-color 110ms ease',
     boxShadow
   }
 }

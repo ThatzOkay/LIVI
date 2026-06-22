@@ -70,6 +70,7 @@ public:
             InstanceMethod("close",         &DabAddon::Close),
             InstanceMethod("selectService", &DabAddon::SelectService),
             InstanceMethod("getService",    &DabAddon::GetService),
+            InstanceMethod("getProgrammeInfo", &DabAddon::GetProgrammeInfo),
             InstanceMethod("onAudio",       &DabAddon::OnAudio),
             InstanceMethod("onService",     &DabAddon::OnService),
             InstanceMethod("onMetadata",    &DabAddon::OnMetadata),
@@ -171,6 +172,38 @@ private:
         obj.Set("id",    Napi::Number::New(env, service.serviceId));
         obj.Set("label", Napi::String::New(env, service.serviceLabel.utf8_label()));
         return obj;
+    }
+
+    // getProgrammeInfo(serviceId: number): { codec: 'DAB' | 'DAB+', bitrateKbps: number } | null
+    // Mirrors welle.io's own GUI (CRadioController::stationTimerTimeout),
+    // which reads this exact same way right after a successful
+    // playSingleProgramme(): walk the service's audio component to find its
+    // subchannel, then read off its codec type and effective bitrate. Safe
+    // to call synchronously for the same reason GetService() is — only
+    // ever invoked from JS-driven code on the main thread.
+    Napi::Value GetProgrammeInfo(const Napi::CallbackInfo& info) {
+        Napi::Env env = info.Env();
+        if (!receiver_ || info.Length() < 1 || !info[0].IsNumber()) return env.Null();
+
+        uint32_t sid = info[0].As<Napi::Number>().Uint32Value();
+        Service service = receiver_->getService(sid);
+        if (service.serviceId == 0) return env.Null();
+
+        for (const auto& sc : receiver_->getComponents(service)) {
+            if (sc.transportMode() != TransportMode::Audio) continue;
+            if (sc.audioType() != AudioServiceComponentType::DAB &&
+                sc.audioType() != AudioServiceComponentType::DABPlus) continue;
+
+            Subchannel subch = receiver_->getSubchannel(sc);
+            if (!subch.valid()) continue;
+
+            auto obj = Napi::Object::New(env);
+            obj.Set("codec", Napi::String::New(env,
+                sc.audioType() == AudioServiceComponentType::DABPlus ? "DAB+" : "DAB"));
+            obj.Set("bitrateKbps", Napi::Number::New(env, subch.bitrate()));
+            return obj;
+        }
+        return env.Null();
     }
 
     // onAudio(cb: (buffer: Buffer, samplerate: number, stereo: bool) => void)

@@ -27,7 +27,8 @@ vi.mock('@main/services/rtlsdr/RadioService', () => ({
     stopDab: vi.fn(),
     getDabState: vi.fn(),
     setDabFavorite: vi.fn(),
-    recallDabFavorite: vi.fn()
+    recallDabFavorite: vi.fn(),
+    resumeDab: vi.fn()
   }
 }))
 
@@ -61,7 +62,8 @@ describe('registerRtlSdrIpc', () => {
       'radio-dab-stop',
       'radio-dab-get-state',
       'radio-dab-set-favorite',
-      'radio-dab-recall-favorite'
+      'radio-dab-recall-favorite',
+      'radio-dab-resume'
     ])
   })
 
@@ -215,5 +217,14 @@ describe('registerRtlSdrIpc', () => {
     handler({}, 4)
 
     expect(radioService.recallDabFavorite).toHaveBeenCalledWith(4)
+  })
+
+  test('radio-dab-resume delegates to radioService.resumeDab', () => {
+    registerRtlSdrIpc()
+    const handler = getHandler('radio-dab-resume')
+
+    handler({})
+
+    expect(radioService.resumeDab).toHaveBeenCalled()
   })
 })

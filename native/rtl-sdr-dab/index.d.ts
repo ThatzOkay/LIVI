@@ -10,6 +10,11 @@ export interface DabService {
   label: string
 }
 
+export interface DabProgrammeInfo {
+  codec: 'DAB' | 'DAB+'
+  bitrateKbps: number
+}
+
 export interface DabStation extends DabService {
   channel: string
   frequencyHz: number
@@ -67,5 +72,6 @@ export declare class DabRadio extends EventEmitter {
   close(): Promise<this>
   selectService(serviceId: number): this
   getService(serviceId: number): DabService | null
+  getProgrammeInfo(serviceId: number): DabProgrammeInfo | null
   scanStations(options?: DabScanOptions): Promise<DabStation[]>
 }

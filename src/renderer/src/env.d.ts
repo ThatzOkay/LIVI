@@ -67,12 +67,17 @@ type RadioState = {
 // — never part of the persisted DabStationRef shape.
 type DabStationView = DabStationRef & { imageUrl?: string }
 
+type DabProgrammeInfo = { codec: 'DAB' | 'DAB+'; bitrateKbps: number }
+
 type DabState = {
   running: boolean
   scanning: boolean
   scanningChannel: string | null
   stations: DabStationView[]
   currentStation: DabStationView | null
+  selectingStation: DabStationView | null
+  programmeInfo: DabProgrammeInfo | null
+  dynamicLabel: string | null
   favorites: (DabStationView | null)[]
 }
 
@@ -174,6 +179,7 @@ declare global {
           getState(): Promise<DabState>
           setFavorite(slot: number): Promise<DabState>
           recallFavorite(slot: number): Promise<DabState>
+          resume(): Promise<DabState>
         }
       }
 

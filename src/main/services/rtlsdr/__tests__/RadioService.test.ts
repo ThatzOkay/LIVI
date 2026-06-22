@@ -1,21 +1,12 @@
 import type { Mock } from 'vitest'
 
-// FMPipeline must be a plain constructor (not vi.fn()) — Vitest's mock proxying for
-// dynamically-imported modules loses `new`-ability on vi.fn()-wrapped properties
-// ("X is not a constructor"), so per-test pipeline swapping goes through a closure
-// variable instead of vi.fn().mockImplementationOnce().
-const { mockAddon, setNextFMPipeline } = vi.hoisted(() => {
-  const defaultPipeline = () => ({
-    process: vi.fn(() => new Float32Array([0.5, -2, 1.5])),
-    rds: vi.fn(() => ({ programId: 0, programType: 'None' })),
-    resetRds: vi.fn()
-  })
-  let nextPipeline: (() => unknown) | null = null
-  function FMPipelineCtor() {
-    const factory = nextPipeline ?? defaultPipeline
-    nextPipeline = null
-    return factory()
-  }
+// Demodulation now happens natively inside the addon's own streaming thread
+// (see lib.rs's read_async()) — readAsync's callback receives ready-to-play
+// PCM directly, and RDS is pulled via getRds() rather than a per-instance
+// pipeline object. getRds is mutable per test via setNextRds, mirroring
+// DabRadio.test.ts's setProgrammeInfo pattern.
+const { mockAddon, setNextRds } = vi.hoisted(() => {
+  let rds: unknown = { programId: 0, programType: 'None' }
   return {
     mockAddon: {
       getDeviceCount: vi.fn(),
@@ -26,10 +17,10 @@ const { mockAddon, setNextFMPipeline } = vi.hoisted(() => {
       setFrequency: vi.fn(),
       readAsync: vi.fn(),
       stopAsync: vi.fn(),
-      FMPipeline: FMPipelineCtor
+      getRds: vi.fn(() => rds)
     },
-    setNextFMPipeline: (factory: () => unknown) => {
-      nextPipeline = factory
+    setNextRds: (next: unknown) => {
+      rds = next
     }
   }
 })
@@ -82,6 +73,7 @@ describe('RadioService', () => {
   beforeEach(async () => {
     vi.clearAllMocks()
     mockAddon.open.mockReturnValue(0)
+    setNextRds({ programId: 0, programType: 'None' })
     await radioService.stopFm()
     await radioService.hydrate({ lastFrequencyMhz: 100, lastMode: 'fm', favorites: [] })
   })
@@ -126,17 +118,15 @@ describe('RadioService', () => {
     })
   })
 
-  test('readAsync callback demodulates and writes clamped PCM to the audio output', async () => {
+  test('readAsync callback writes the already-demodulated PCM straight to the audio output', async () => {
     await radioService.startFm(100.0)
 
+    expect(mockAddon.readAsync).toHaveBeenCalledWith(expect.any(Function), 48000)
     const cb = mockAddon.readAsync.mock.calls[0][0] as (buf: Buffer) => void
-    cb(Buffer.from([0, 0]))
+    const pcm = Buffer.from([1, 2, 3, 4])
+    cb(pcm)
 
-    expect(mockAudioOutput.write).toHaveBeenCalledTimes(1)
-    const written = mockAudioOutput.write.mock.calls[0][0] as Int16Array
-    expect(written[0]).toBe(Math.round(0.5 * 32767))
-    expect(written[1]).toBe(-32767)
-    expect(written[2]).toBe(32767)
+    expect(mockAudioOutput.write).toHaveBeenCalledWith(pcm)
   })
 
   test('stop tears down audio output and the device', async () => {
@@ -197,17 +187,7 @@ describe('RadioService', () => {
   })
 
   test('readAsync callback picks up station info and broadcasts when it changes', async () => {
-    const fmPipeline = {
-      process: vi.fn(() => new Float32Array([0])),
-      rds: vi.fn().mockReturnValueOnce({ programId: 0, programType: 'None' }).mockReturnValue({
-        programId: 4242,
-        programType: 'Pop',
-        stationName: 'TEST FM',
-        radioText: 'Now playing'
-      }),
-      resetRds: vi.fn()
-    }
-    setNextFMPipeline(() => fmPipeline)
+    setNextRds({ programId: 0, programType: 'None' })
 
     await radioService.startFm(100.0)
     const cb = mockAddon.readAsync.mock.calls[0][0] as (buf: Buffer) => void
@@ -215,6 +195,12 @@ describe('RadioService', () => {
     cb(Buffer.from([0, 0]))
     expect(radioService.getState().station).toBeNull()
 
+    setNextRds({
+      programId: 4242,
+      programType: 'Pop',
+      stationName: 'TEST FM',
+      radioText: 'Now playing'
+    })
     cb(Buffer.from([0, 0]))
     expect(radioService.getState().station).toEqual({
       id: 4242,
@@ -224,18 +210,13 @@ describe('RadioService', () => {
     })
   })
 
-  test('retuning resets RDS state on the pipeline and clears cached station info', async () => {
-    const fmPipeline = {
-      process: vi.fn(() => new Float32Array([0])),
-      rds: vi.fn(() => ({
-        programId: 4242,
-        programType: 'Pop',
-        stationName: 'TEST FM',
-        radioText: 'Now playing'
-      })),
-      resetRds: vi.fn()
-    }
-    setNextFMPipeline(() => fmPipeline)
+  test('retuning clears cached station info — the addon resets its own RDS state in lockstep', async () => {
+    setNextRds({
+      programId: 4242,
+      programType: 'Pop',
+      stationName: 'TEST FM',
+      radioText: 'Now playing'
+    })
 
     await radioService.startFm(100.0)
     const cb = mockAddon.readAsync.mock.calls[0][0] as (buf: Buffer) => void
@@ -244,7 +225,6 @@ describe('RadioService', () => {
 
     await radioService.setFmFrequency(98.0)
 
-    expect(fmPipeline.resetRds).toHaveBeenCalled()
     expect(radioService.getState().station).toBeNull()
   })
 
@@ -290,7 +270,8 @@ describe('RadioService', () => {
         lastFrequencyMhz: 98.5,
         lastMode: 'fm',
         favorites: [null, null, 98.5, null, null],
-        dabFavorites: NO_FAVORITES
+        dabFavorites: NO_FAVORITES,
+        lastDabStation: null
       }
     })
     vi.useRealTimers()
@@ -340,7 +321,8 @@ describe('RadioService', () => {
         lastFrequencyMhz: 98.0,
         lastMode: 'fm',
         favorites: NO_FAVORITES,
-        dabFavorites: NO_FAVORITES
+        dabFavorites: NO_FAVORITES,
+        lastDabStation: null
       }
     })
     vi.useRealTimers()
