@@ -227,8 +227,7 @@ describe('Radio component', () => {
       render(<Radio />)
 
       const tile = screen.getByLabelText('Test FM, channel 5A')
-      const img = tile.querySelector('img') as HTMLImageElement
-      expect(img.src).toBe('data:image/png;base64,xyz')
+      expect(tile.style.background).toContain('data:image/png;base64,xyz')
     })
 
     test('renders a cached thumbnail as the favorite slot background when available', () => {

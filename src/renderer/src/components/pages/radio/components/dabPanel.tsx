@@ -9,6 +9,100 @@ import type { DabHookState, DabStationRef } from '../../media/hooks'
 import { circleBtnStyle } from '../../media/styles'
 import { DabFavoritesRow } from './dabFavorites'
 
+type StationTileProps = {
+  station: DabStationRef & { imageUrl?: string }
+  isActive: boolean
+  titlePx: number
+  ringColor: string
+  onSelect: () => void
+}
+
+const StationTile = ({ station: s, isActive, titlePx, ringColor, onSelect }: StationTileProps) => {
+  const [hover, setHover] = useState(false)
+  const [pressed, setPressed] = useState(false)
+  const hasImage = !!s.imageUrl
+
+  return (
+    <button
+      onClick={onSelect}
+      onPointerDown={() => setPressed(true)}
+      onPointerUp={() => setPressed(false)}
+      onPointerLeave={() => {
+        setPressed(false)
+        setHover(false)
+      }}
+      onPointerEnter={(e) => {
+        if (e.pointerType === 'mouse') setHover(true)
+      }}
+      aria-pressed={isActive}
+      aria-label={`${s.label.trim() || s.channel}, channel ${s.channel}${isActive ? ', now playing' : ''}`}
+      style={{
+        position: 'relative',
+        border: 'none',
+        borderRadius: 14,
+        aspectRatio: '1.6',
+        display: 'flex',
+        flexDirection: 'column',
+        alignItems: 'flex-start',
+        justifyContent: 'flex-end',
+        background: hasImage
+          ? `linear-gradient(to top, rgba(0,0,0,0.8) 0%, rgba(0,0,0,0.25) 60%, rgba(0,0,0,0) 100%), url(${s.imageUrl})`
+          : hover || pressed
+            ? 'rgba(255,255,255,0.14)'
+            : 'rgba(255,255,255,0.07)',
+        backgroundSize: 'cover',
+        backgroundPosition: 'center',
+        color: hasImage ? '#fff' : 'inherit',
+        cursor: 'pointer',
+        overflow: 'hidden',
+        padding: '6px 8px',
+        boxShadow: isActive ? `0 0 0 2px ${ringColor}` : '0 0 0 1px rgba(255,255,255,0.08)',
+        transform: pressed ? 'scale(0.96)' : 'scale(1)',
+        transition: 'transform 110ms ease, box-shadow 150ms ease, background 150ms ease'
+      }}
+    >
+      {isActive && (
+        <span
+          style={{
+            position: 'absolute',
+            top: 6,
+            right: 6,
+            width: 7,
+            height: 7,
+            borderRadius: '50%',
+            background: ringColor,
+            boxShadow: `0 0 4px ${ringColor}`
+          }}
+        />
+      )}
+      <span
+        style={{
+          fontSize: Math.round(titlePx * 0.3),
+          fontWeight: 700,
+          maxWidth: '100%',
+          overflow: 'hidden',
+          textOverflow: 'ellipsis',
+          whiteSpace: 'nowrap'
+        }}
+      >
+        {s.label.trim() || s.channel}
+      </span>
+      <span
+        style={{
+          fontSize: Math.round(titlePx * 0.2),
+          opacity: 0.75,
+          marginTop: 2,
+          padding: '1px 6px',
+          borderRadius: 999,
+          background: hasImage ? 'rgba(0,0,0,0.35)' : 'rgba(255,255,255,0.12)'
+        }}
+      >
+        {s.channel}
+      </span>
+    </button>
+  )
+}
+
 type DabPanelProps = {
   tabs: ReactNode
   titlePx: number
@@ -109,10 +203,11 @@ export const DabPanel = ({
           style={{
             display: 'grid',
             gridTemplateColumns: 'repeat(4, 1fr)',
-            gap: Math.round(sectionGap * 0.6),
+            gap: Math.round(sectionGap * 0.7),
             width: '100%',
             maxWidth: 480,
             maxHeight: '40%',
+            padding: 2,
             overflowY: 'auto'
           }}
         >
@@ -120,78 +215,30 @@ export const DabPanel = ({
             <div
               style={{
                 gridColumn: '1 / -1',
+                display: 'flex',
+                flexDirection: 'column',
+                alignItems: 'center',
+                gap: 6,
                 opacity: 0.5,
                 fontSize: Math.round(titlePx * 0.3),
-                textAlign: 'center'
+                textAlign: 'center',
+                padding: '1rem 0'
               }}
             >
+              <RadioIcon sx={{ fontSize: Math.round(titlePx * 0.7) }} />
               {scanning ? 'Listening for ensembles…' : 'No stations yet — tap Scan to search'}
             </div>
           ) : (
-            stations.map((s) => {
-              const isActive = currentStation?.id === s.id && currentStation.channel === s.channel
-              return (
-                <button
-                  key={`${s.channel}:${s.id}`}
-                  onClick={() => onSelectStation(s)}
-                  aria-pressed={isActive}
-                  aria-label={`${s.label.trim() || s.channel}, channel ${s.channel}`}
-                  style={{
-                    position: 'relative',
-                    opacity: isActive ? 1 : 0.7,
-                    border: `1px solid ${isActive ? ringColor : 'currentColor'}`,
-                    borderRadius: 8,
-                    aspectRatio: '1.6',
-                    display: 'flex',
-                    flexDirection: 'column',
-                    alignItems: 'center',
-                    justifyContent: 'center',
-                    background: isActive ? 'rgba(255,255,255,0.16)' : 'transparent',
-                    color: 'inherit',
-                    cursor: 'pointer',
-                    overflow: 'hidden',
-                    padding: '4px 6px'
-                  }}
-                >
-                  {s.imageUrl && (
-                    <img
-                      src={s.imageUrl}
-                      alt=""
-                      style={{
-                        position: 'absolute',
-                        inset: 0,
-                        width: '100%',
-                        height: '100%',
-                        objectFit: 'cover',
-                        opacity: 0.55
-                      }}
-                    />
-                  )}
-                  <span
-                    style={{
-                      position: 'relative',
-                      fontSize: Math.round(titlePx * 0.3),
-                      fontWeight: 700,
-                      maxWidth: '100%',
-                      overflow: 'hidden',
-                      textOverflow: 'ellipsis',
-                      whiteSpace: 'nowrap'
-                    }}
-                  >
-                    {s.label.trim() || s.channel}
-                  </span>
-                  <span
-                    style={{
-                      position: 'relative',
-                      fontSize: Math.round(titlePx * 0.22),
-                      opacity: 0.6
-                    }}
-                  >
-                    {s.channel}
-                  </span>
-                </button>
-              )
-            })
+            stations.map((s) => (
+              <StationTile
+                key={`${s.channel}:${s.id}`}
+                station={s}
+                isActive={currentStation?.id === s.id && currentStation.channel === s.channel}
+                titlePx={titlePx}
+                ringColor={ringColor}
+                onSelect={() => onSelectStation(s)}
+              />
+            ))
           )}
         </div>
       </div>
