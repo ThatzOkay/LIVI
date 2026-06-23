@@ -636,7 +636,7 @@ export interface StatusStore {
   setRtlSdrConnected: (connected: boolean) => void
 }
 
-export const useStatusStore = create<StatusStore>((set) => ({
+export const useStatusStore = create<StatusStore>((set, get) => ({
   reverse: false,
   lights: false,
   isDongleConnected: false,
@@ -647,8 +647,16 @@ export const useStatusStore = create<StatusStore>((set) => ({
   clusterDashActive: false,
 
   setCameraFound: (found) => set({ cameraFound: found }),
-  setDongleConnected: (connected) => set({ isDongleConnected: connected }),
-  setAaActive: (active) => set({ isAaActive: active }),
+  setDongleConnected: (connected) => {
+    const wasActive = get().isDongleConnected || get().isAaActive
+    set({ isDongleConnected: connected })
+    if (connected && !wasActive) useLiviStore.getState().markRestartBaseline()
+  },
+  setAaActive: (active) => {
+    const wasActive = get().isDongleConnected || get().isAaActive
+    set({ isAaActive: active })
+    if (active && !wasActive) useLiviStore.getState().markRestartBaseline()
+  },
   setStreaming: (streaming) => set({ isStreaming: streaming }),
   setReverse: (reverse) => set({ reverse }),
   setLights: (lights) => set({ lights }),
