@@ -24,6 +24,8 @@ asarUnpack:
   - resources/**
   - node_modules/usb/**
   - node_modules/gst-video/**
+  - node_modules/rtl-sdr-fm/**
+  - node_modules/rtl-sdr-dab/**
 
 linux:
   target:

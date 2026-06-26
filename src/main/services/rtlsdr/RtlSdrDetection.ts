@@ -14,7 +14,8 @@ function load(): RtlSdrAddon | null {
     addon = require('rtl-sdr-fm') as RtlSdrAddon
   } catch (e) {
     loadFailed = true
-    console.error('[RtlSdr] native addon load failed:', (e as Error).message)
+    const err = e as Error & { cause?: unknown }
+    console.error('[RtlSdr] native addon load failed:', err.message, err.cause ?? '')
   }
   return addon
 }

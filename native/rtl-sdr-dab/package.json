@@ -8,6 +8,7 @@
     "build:debug": "cmake-js compile --debug",
     "clean": "cmake-js clean",
     "rebuild": "cmake-js rebuild",
+    "postinstall": "cmake-js compile --release",
     "test:scan": "node test-scan.js",
     "test:scan:quick": "node test-scan.js 250"
   },
