@@ -71,6 +71,12 @@ target_include_directories(welle_backend PUBLIC
   ${MPG123_INCLUDE_DIRS}
 )
 
+target_link_directories(welle_backend PUBLIC
+  ${FFTW3F_LIBRARY_DIRS}
+  ${FAAD_LIBRARY_DIRS}
+  ${MPG123_LIBRARY_DIRS}
+)
+
 target_link_libraries(welle_backend
   ${FFTW3F_LIBRARIES}
   ${FAAD_LIBRARIES}
@@ -103,6 +109,10 @@ set_target_properties(${PROJECT_NAME} PROPERTIES
 target_include_directories(${PROJECT_NAME} PRIVATE
   ${WELLE_BACKEND_DIR}
   ${RTLSDR_INCLUDE_DIRS}
+)
+
+target_link_directories(${PROJECT_NAME} PRIVATE
+  ${RTLSDR_LIBRARY_DIRS}
 )
 
 target_link_libraries(${PROJECT_NAME}
