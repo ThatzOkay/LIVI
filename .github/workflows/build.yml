@@ -199,7 +199,8 @@ jobs:
               ninja-build bison \
               libegl-dev libgles-dev libgbm-dev libcairo2-dev \
               libffi-dev libexpat1-dev \
-              librtlsdr-dev libasound2-dev
+              librtlsdr-dev libasound2-dev \
+              libfftw3-dev libfaad-dev libmpg123-dev
           sudo rm -rf /var/lib/apt/lists/*
           sudo pip3 install --break-system-packages --upgrade 'meson>=1.4'
 
@@ -236,7 +237,8 @@ jobs:
               ninja-build bison \
               libegl-dev libgles-dev libgbm-dev libcairo2-dev \
               libffi-dev libexpat1-dev \
-              librtlsdr-dev libasound2-dev
+              librtlsdr-dev libasound2-dev \
+              libfftw3-dev libfaad-dev libmpg123-dev
           sudo rm -rf /var/lib/apt/lists/*
           sudo pip3 install --break-system-packages --upgrade 'meson>=1.4'
 
