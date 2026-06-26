@@ -268,7 +268,7 @@ jobs:
           HOMEBREW_NO_AUTO_UPDATE: '1'
         run: |
           set -euo pipefail
-          for pkg in pkg-config librtlsdr; do
+          for pkg in pkg-config librtlsdr fftw faad2 mpg123; do
             brew list --versions "$pkg" >/dev/null || brew install "$pkg" >/dev/null
           done
 
