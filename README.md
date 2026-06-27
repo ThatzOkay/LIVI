@@ -181,11 +181,9 @@ pnpm run install:ci
 
 # --- Build targets ---
 
-# Linux x86_64 (AppImage)
-pnpm run build:linux
-
-# Linux ARM64 (AppImage)
-pnpm run build:armLinux
+# Linux (AppImage)
+pnpm run build:linux:arm64         # ARM
+pnpm run build:linux:x64           # X86_64
 
 # macOS (dmg)
 pnpm run build:mac:arm64           # Apple Silicon
