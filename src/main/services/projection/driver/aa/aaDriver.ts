@@ -584,17 +584,16 @@ export class AaDriver extends EventEmitter implements IPhoneDriver {
         return true
       }
 
-      // TODO: replace with KEYCODE_TURN_CARD (65544) or PRIMARY/SECONDARY
-      if (cmd === CommandMapping.up) {
-        if (DEBUG) console.log(`[INPUT] up → DPAD_LEFT (interim tile-cycle)`)
-        this._aa.sendButton(BUTTON_KEY.DPAD_LEFT, true)
-        this._aa.sendButton(BUTTON_KEY.DPAD_LEFT, false)
-        return true
+      // D-pad up/down: move focus vertically through the elements.
+      const dpadKey: Partial<Record<number, number>> = {
+        [CommandMapping.up]: BUTTON_KEY.DPAD_UP,
+        [CommandMapping.down]: BUTTON_KEY.DPAD_DOWN
       }
-      if (cmd === CommandMapping.down) {
-        if (DEBUG) console.log(`[INPUT] down → DPAD_RIGHT (interim tile-cycle)`)
-        this._aa.sendButton(BUTTON_KEY.DPAD_RIGHT, true)
-        this._aa.sendButton(BUTTON_KEY.DPAD_RIGHT, false)
+      const dpad = dpadKey[cmd]
+      if (dpad !== undefined) {
+        if (DEBUG) console.log(`[INPUT] → dpad keycode ${dpad} press+release`)
+        this._aa.sendButton(dpad, true)
+        this._aa.sendButton(dpad, false)
         return true
       }
 
