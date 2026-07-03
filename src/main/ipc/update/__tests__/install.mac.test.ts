@@ -35,7 +35,6 @@ describe('installOnMacFromFile', () => {
     await installOnMacFromFile('/tmp/LIVI.dmg')
     vi.runAllTimers()
 
-    expect(sendUpdateEvent).toHaveBeenCalledWith({ phase: 'installing' })
     expect(installFromDmg).toHaveBeenCalledWith('/tmp/LIVI.dmg')
     expect(sendUpdateEvent).toHaveBeenCalledWith({ phase: 'relaunching' })
     expect(app.relaunch).toHaveBeenCalledTimes(1)

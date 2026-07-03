@@ -58,7 +58,9 @@ export interface ProjectionIpcHost {
 
   // Cluster
   getConfig(): Config
-  setClusterRequested(v: boolean): void
+  setClusterRequested(id: number, wanted: boolean): void
+  isMainClusterWindow(id: number): boolean
+  isClusterRequested(): boolean
   setClusterVisible(v: boolean): void
   resetLastClusterVideoSize(): void
   getLastClusterCodec(): string | null

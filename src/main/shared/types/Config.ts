@@ -215,6 +215,13 @@ export type Config = {
   uiZoomPercent: number
   appearanceMode: AppearanceMode
 
+  // Display calibration, applied as the Pi compositor output gamma LUT
+  displayGamma: number
+  displayContrast: number
+  displayColorR: number
+  displayColorG: number
+  displayColorB: number
+
   // Camera + dashboards + media slots
   cameraId: string
   camera: WindowAssignment

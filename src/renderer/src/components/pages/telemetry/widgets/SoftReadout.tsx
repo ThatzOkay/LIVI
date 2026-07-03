@@ -11,6 +11,8 @@ export type SoftReadoutProps = {
   maxChars?: number
   /** Big-value font size in px. */
   size?: number
+  /** Rounded backdrop colour behind the value and caption. */
+  backdropColor?: string
   className?: string
 }
 
@@ -23,6 +25,7 @@ export function SoftReadout({
   align = 'center',
   maxChars,
   size = 96,
+  backdropColor,
   className
 }: SoftReadoutProps) {
   const theme = useTheme()
@@ -45,7 +48,13 @@ export function SoftReadout({
         sx={{
           display: 'inline-flex',
           flexDirection: 'column',
-          alignItems: flexAlign
+          alignItems: flexAlign,
+          ...(backdropColor && {
+            backgroundColor: backdropColor,
+            borderRadius: '16px',
+            px: '18px',
+            py: '10px'
+          })
         }}
       >
         <Box

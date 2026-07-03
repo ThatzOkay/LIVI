@@ -1,4 +1,4 @@
-import { useEffect, useReducer, useRef } from 'react'
+import { useEffect, useId, useReducer, useRef } from 'react'
 
 export type GaugeArcProps = {
   /** Current value (drives the running pointer). */
@@ -31,6 +31,9 @@ export type GaugeArcProps = {
   colorMajor: string
   colorPointer: string
   colorRedline: string
+  /** Soft C-shaped backdrop drawn behind the arc ticks. */
+  shadow?: boolean
+  shadowColor?: string
   className?: string
 }
 
@@ -100,8 +103,12 @@ export function GaugeArc({
   colorMajor,
   colorPointer,
   colorRedline,
+  shadow = false,
+  shadowColor = 'rgba(0, 0, 0, 0.5)',
   className
 }: GaugeArcProps) {
+  const blurId = useId()
+  const shadowR = radius + 6
   const arcTicks = Math.max(2, Math.floor(ticks))
   const caps = Math.max(0, Math.floor(armTicks))
   const pts = gaugeTicks(radius, gapDeg, arcTicks, caps)
@@ -177,6 +184,22 @@ export function GaugeArc({
       aria-label="gauge"
       style={{ width: '100%', height: '100%', display: 'block', overflow: 'visible' }}
     >
+      {shadow && (
+        <>
+          <filter id={blurId} x="-75%" y="-75%" width="250%" height="250%">
+            <feGaussianBlur stdDeviation={13} />
+          </filter>
+          <path
+            d={`M 0 ${shadowR} A ${shadowR} ${shadowR} 0 0 ${mirror ? 0 : 1} 0 ${-shadowR}`}
+            fill="none"
+            stroke={shadowColor}
+            strokeWidth={42}
+            strokeLinecap="round"
+            filter={`url(#${blurId})`}
+          />
+        </>
+      )}
+
       {/* scale: caps (faded), minor + major arc ticks */}
       {pts.map((p, i) => {
         const isArc = p.t !== null

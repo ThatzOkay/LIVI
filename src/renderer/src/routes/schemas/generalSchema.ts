@@ -33,9 +33,7 @@ export const generalSchema: SettingsNode<Config> = {
           displayValue: true,
           page: {
             title: 'Car Name',
-            labelTitle: 'settings.carName',
-            description: 'The name of the CarPlay device',
-            labelDescription: 'settings.carNameDescription'
+            labelTitle: 'settings.carName'
           }
         },
         {
@@ -46,9 +44,7 @@ export const generalSchema: SettingsNode<Config> = {
           displayValue: true,
           page: {
             title: 'UI Name',
-            labelTitle: 'settings.uiName',
-            description: 'The name displayed in the CarPlay UI.',
-            labelDescription: 'settings.uiNameDescription'
+            labelTitle: 'settings.uiName'
           }
         },
         {
@@ -76,9 +72,7 @@ export const generalSchema: SettingsNode<Config> = {
               ],
               page: {
                 title: 'Wi-Fi Frequency',
-                labelTitle: 'settings.wifiFrequency',
-                description: 'Wi-Fi frequency selection',
-                labelDescription: 'settings.wifiFrequencyDescription'
+                labelTitle: 'settings.wifiFrequency'
               }
             },
             {
@@ -89,10 +83,7 @@ export const generalSchema: SettingsNode<Config> = {
               displayValue: true,
               page: {
                 title: 'Wi-Fi Password',
-                labelTitle: 'settings.wifiPassword',
-                description:
-                  'Passphrase for the native AA/CP Wi-Fi access point. Phones use this to join after BT pairing.',
-                labelDescription: 'settings.wifiPasswordDescription'
+                labelTitle: 'settings.wifiPassword'
               }
             }
           ]
@@ -130,10 +121,7 @@ export const generalSchema: SettingsNode<Config> = {
           ],
           page: {
             title: 'Preferred Connection',
-            labelTitle: 'settings.preferredConnection',
-            description:
-              'Which transport to bring up when both a dongle and a phone are detected. Auto: first-plug wins. Dongle / Native: that side is preferred.',
-            labelDescription: 'settings.preferredConnectionDescription'
+            labelTitle: 'settings.preferredConnection'
           }
         }
       ]
@@ -163,9 +151,7 @@ export const generalSchema: SettingsNode<Config> = {
               displayValue: true,
               page: {
                 title: 'Main Screen Width',
-                labelTitle: 'settings.mainScreenWidth',
-                description: 'Main Screen width in px',
-                labelDescription: 'settings.mainScreenWidthDescription'
+                labelTitle: 'settings.mainScreenWidth'
               }
             },
             {
@@ -179,9 +165,7 @@ export const generalSchema: SettingsNode<Config> = {
               displayValue: true,
               page: {
                 title: 'Main Screen Height',
-                labelTitle: 'settings.mainScreenHeight',
-                description: 'Main Screen height in px',
-                labelDescription: 'settings.mainScreenHeightDescription'
+                labelTitle: 'settings.mainScreenHeight'
               }
             },
             {
@@ -216,9 +200,7 @@ export const generalSchema: SettingsNode<Config> = {
               displayValue: true,
               page: {
                 title: 'Dash Screen Width',
-                labelTitle: 'settings.dashScreenWidth',
-                description: 'Dash Screen width in px',
-                labelDescription: 'settings.dashScreenWidthDescription'
+                labelTitle: 'settings.dashScreenWidth'
               }
             },
             {
@@ -232,9 +214,7 @@ export const generalSchema: SettingsNode<Config> = {
               displayValue: true,
               page: {
                 title: 'Dash Screen Height',
-                labelTitle: 'settings.dashScreenHeight',
-                description: 'Dash Screen height in px',
-                labelDescription: 'settings.dashScreenHeightDescription'
+                labelTitle: 'settings.dashScreenHeight'
               }
             },
             {
@@ -269,9 +249,7 @@ export const generalSchema: SettingsNode<Config> = {
               displayValue: true,
               page: {
                 title: 'Aux Screen Width',
-                labelTitle: 'settings.auxScreenWidth',
-                description: 'Aux Screen width in px',
-                labelDescription: 'settings.auxScreenWidthDescription'
+                labelTitle: 'settings.auxScreenWidth'
               }
             },
             {
@@ -285,9 +263,7 @@ export const generalSchema: SettingsNode<Config> = {
               displayValue: true,
               page: {
                 title: 'Aux Screen Height',
-                labelTitle: 'settings.auxScreenHeight',
-                description: 'Aux Screen height in px',
-                labelDescription: 'settings.auxScreenHeightDescription'
+                labelTitle: 'settings.auxScreenHeight'
               }
             },
             {
@@ -739,9 +715,7 @@ export const generalSchema: SettingsNode<Config> = {
       ],
       page: {
         title: 'Start Page',
-        labelTitle: 'settings.startPage',
-        description: 'Select which page LIVI should open on startup.',
-        labelDescription: 'settings.startPageDescription'
+        labelTitle: 'settings.startPage'
       }
     },
     {
@@ -757,9 +731,7 @@ export const generalSchema: SettingsNode<Config> = {
       },
       page: {
         title: 'FFT Visualization Delay',
-        labelTitle: 'settings.fftDelay',
-        description: 'Delays the FFT visualization to compensate for audio latency.',
-        labelDescription: 'settings.fftDelayDescription'
+        labelTitle: 'settings.fftDelay'
       }
     },
     {
@@ -774,9 +746,7 @@ export const generalSchema: SettingsNode<Config> = {
       ],
       page: {
         title: 'Steering wheel position',
-        labelTitle: 'settings.steeringWheelPosition',
-        description: 'Set the position of the steering wheel controls.',
-        labelDescription: 'settings.steeringWheelPositionDescription'
+        labelTitle: 'settings.steeringWheelPosition'
       }
     },
     {
@@ -795,9 +765,7 @@ export const generalSchema: SettingsNode<Config> = {
       },
       page: {
         title: 'UI Zoom',
-        labelTitle: 'settings.uiZoom',
-        description: 'Adjust the global UI zoom level of the application window.',
-        labelDescription: 'settings.uiZoomDescription'
+        labelTitle: 'settings.uiZoom'
       }
     },
     {
@@ -814,9 +782,7 @@ export const generalSchema: SettingsNode<Config> = {
       ],
       page: {
         title: 'Language',
-        labelTitle: 'settings.language',
-        description: 'Select the application language',
-        labelDescription: 'settings.languageDescription'
+        labelTitle: 'settings.language'
       }
     },
     {
@@ -844,9 +810,7 @@ export const generalSchema: SettingsNode<Config> = {
           },
           page: {
             title: 'Audio Buffer',
-            labelTitle: 'settings.audioBufferSize',
-            description: 'Dongle audio buffer size in ms',
-            labelDescription: 'settings.audioBufferDescription'
+            labelTitle: 'settings.audioBufferSize'
           }
         },
         {
@@ -862,9 +826,7 @@ export const generalSchema: SettingsNode<Config> = {
           ],
           page: {
             title: 'Microphone',
-            labelTitle: 'settings.microphone',
-            description: 'Microphone selection',
-            labelDescription: 'settings.microphoneDescription'
+            labelTitle: 'settings.microphone'
           }
         },
         {

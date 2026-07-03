@@ -26,7 +26,6 @@ let lastClusterResolution: unknown = null
 let clusterResolutionHandlers: ChunkHandler[] = []
 
 type TelemetryHandler = (payload: unknown) => void
-let telemetryQueue: unknown[] = []
 let telemetryHandlers: TelemetryHandler[] = []
 
 let projectionEventQueue: Array<[IpcRendererEvent, ...unknown[]]> = []
@@ -58,11 +57,7 @@ ipcRenderer.on('cluster-video-resolution', (_event, payload: unknown) => {
 })
 
 ipcRenderer.on('telemetry:update', (_event, payload: unknown) => {
-  if (telemetryHandlers.length) {
-    telemetryHandlers.forEach((handler) => handler(payload))
-  } else {
-    telemetryQueue.push(payload)
-  }
+  telemetryHandlers.forEach((handler) => handler(payload))
 })
 
 ipcRenderer.on('projection-event', (event, ...args: unknown[]) => {
@@ -296,8 +291,6 @@ const api = {
     },
     onTelemetry: (handler: (payload: unknown) => void): void => {
       telemetryHandlers.push(handler)
-      telemetryQueue.forEach((p) => handler(p))
-      telemetryQueue = []
     },
     offTelemetry: (handler: (payload: unknown) => void): void => {
       telemetryHandlers = telemetryHandlers.filter((h) => h !== handler)

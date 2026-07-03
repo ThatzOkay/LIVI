@@ -23,7 +23,7 @@ export const Telemetry: FC<TelemetryProps> = ({ windowRole = 'main' }) => {
   const [index, setIndex] = useState(0)
 
   const { dashboards } = normalizeDashComponents(settings?.dashboards, windowRole)
-  const { isNavbarHidden } = useNavbarHidden()
+  const { isNavbarHidden, isNavPresent } = useNavbarHidden()
   const { prev, next, canPrev, canNext, onPointerDown, onPointerUp } = useKeyboardNavigation({
     dashboards,
     isNavbarHidden,
@@ -103,6 +103,7 @@ export const Telemetry: FC<TelemetryProps> = ({ windowRole = 'main' }) => {
           dotsLength={Number(dashboards.length)}
           onSetIndex={setIndex}
           isNavbarHidden={isNavbarHidden}
+          isNavPresent={isNavPresent}
         />
       )}
     </Box>

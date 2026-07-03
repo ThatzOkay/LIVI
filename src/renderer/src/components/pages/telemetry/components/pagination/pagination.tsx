@@ -7,11 +7,12 @@ export const DashboardsPagination: FC<DashboardsPaginationProps> = ({
   activeIndex,
   dotsLength,
   onSetIndex,
-  isNavbarHidden
+  isNavbarHidden,
+  isNavPresent
 }) => {
   const theme = useTheme()
 
-  const { showDots, revealDots } = usePaginationDots(isNavbarHidden)
+  const { showDots, revealDots } = usePaginationDots(isNavbarHidden, isNavPresent)
 
   return (
     <Box

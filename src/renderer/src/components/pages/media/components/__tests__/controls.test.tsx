@@ -85,7 +85,6 @@ describe('Controls', () => {
         press={{ play: false, next: false, prev: false }}
         focus={{ play: false, next: false, prev: false }}
         iconPx={18}
-        iconMainPx={24}
         {...overrides}
       />
     )
@@ -194,7 +193,7 @@ describe('Controls', () => {
     )
 
     expect(circleBtnStyleMock).toHaveBeenCalledWith(
-      44,
+      40,
       expect.objectContaining({
         pressed: true,
         focused: true,

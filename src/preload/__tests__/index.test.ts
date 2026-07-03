@@ -194,17 +194,19 @@ describe('preload api bridge', () => {
     expect(resolutionHandler).toHaveBeenCalledWith({ width: 800, height: 480 })
   })
 
-  test('ipc telemetry queues before subscription and offTelemetry removes handler', async () => {
+  test('ipc telemetry is not buffered before subscription and offTelemetry removes handler', async () => {
     const { projection } = await loadPreload()
     const handler = vi.fn()
 
     emit('telemetry:update', { speed: 42 })
-
     projection.ipc.onTelemetry(handler)
-    expect(handler).toHaveBeenCalledWith({ speed: 42 })
+    expect(handler).not.toHaveBeenCalled()
+
+    emit('telemetry:update', { speed: 99 })
+    expect(handler).toHaveBeenCalledWith({ speed: 99 })
 
     projection.ipc.offTelemetry(handler)
-    emit('telemetry:update', { speed: 99 })
+    emit('telemetry:update', { speed: 123 })
 
     expect(handler).toHaveBeenCalledTimes(1)
   })

@@ -115,7 +115,7 @@ self.onmessage = (e: MessageEvent) => {
       const buffer = [bins.buffer] as unknown as string // TODO TS workaround. Fix type properly.
       self.postMessage({ type: 'bins', bins }, buffer)
 
-      ringBuffer = ringBuffer.subarray(fftSize)
+      ringBuffer = ringBuffer.subarray(fftSize >> 2)
     }
   }
 }

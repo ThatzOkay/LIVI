@@ -1,16 +1,12 @@
 import { render, screen } from '@testing-library/react'
 import { SettingsFieldPage } from '../SettingsFieldPage'
 
-vi.mock('react-i18next', () => ({
-  useTranslation: () => ({ t: (k: string) => `t:${k}` })
-}))
-
 vi.mock('../SettingsFieldControl', () => ({
   SettingsFieldControl: () => <div data-testid="field-control" />
 }))
 
 describe('SettingsFieldPage', () => {
-  test('renders translated page description', () => {
+  test('renders the field control without the page description', () => {
     render(
       <SettingsFieldPage
         node={
@@ -18,7 +14,7 @@ describe('SettingsFieldPage', () => {
             type: 'string',
             path: 'name',
             label: 'Name',
-            page: { labelDescription: 'settings.name.desc' }
+            page: { labelDescription: 'settings.name.desc', description: 'plain desc' }
           } as any
         }
         value="x"
@@ -27,18 +23,8 @@ describe('SettingsFieldPage', () => {
     )
 
     expect(screen.getByTestId('field-control')).toBeInTheDocument()
-    expect(screen.getByText('t:settings.name.desc')).toBeInTheDocument()
-  })
-
-  test('does not render description when not provided', () => {
-    render(
-      <SettingsFieldPage
-        node={{ type: 'string', path: 'name', label: 'Name' } as any}
-        value="x"
-        onChange={vi.fn()}
-      />
-    )
-    expect(screen.getByTestId('field-control')).toBeInTheDocument()
+    expect(screen.queryByText('settings.name.desc')).toBeNull()
     expect(screen.queryByText('t:settings.name.desc')).toBeNull()
+    expect(screen.queryByText('plain desc')).toBeNull()
   })
 })

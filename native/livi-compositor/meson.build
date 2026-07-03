@@ -20,9 +20,12 @@ wayland_server = dependency('wayland-server')
 xkbcommon = dependency('xkbcommon')
 pixman = dependency('pixman-1')
 cairo = dependency('cairo')
+# Direct GLES2 + EGL calls for the output gamma post-process shader.
+glesv2 = dependency('glesv2')
+egl = dependency('egl')
 
 executable('livi-compositor',
   'livi-compositor.c',
-  dependencies: [wlroots, wayland_server, xkbcommon, pixman, cairo],
+  dependencies: [wlroots, wayland_server, xkbcommon, pixman, cairo, glesv2, egl],
   c_args: ['-DWLR_USE_UNSTABLE', '-D_GNU_SOURCE'],
   install: false)

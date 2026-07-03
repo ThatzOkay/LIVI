@@ -135,7 +135,8 @@ vi.mock('electron', () => ({
   app: {
     getPath: vi.fn(() => '/tmp/appdata')
   },
-  WebContents: class {}
+  WebContents: class {},
+  webContents: { fromId: vi.fn((id: number) => ({ id, isDestroyed: () => false })) }
 }))
 
 vi.mock('usb', () => ({
@@ -901,9 +902,12 @@ describe('ProjectionService', () => {
     svc.lastClusterVideoHeight = 456
 
     const h = getHandle('cluster:request')
-    await expect(h.call(svc, null, false)).resolves.toEqual({ ok: true, enabled: false })
+    await expect(h.call(svc, { sender: { id: 1 } }, false)).resolves.toEqual({
+      ok: true,
+      enabled: false
+    })
 
-    expect(svc.clusterRequested).toBe(false)
+    expect(svc.clusterRequestedBy.size).toBe(0)
     expect(svc.lastClusterVideoWidth).toBeUndefined()
     expect(svc.lastClusterVideoHeight).toBeUndefined()
   })
@@ -916,9 +920,12 @@ describe('ProjectionService', () => {
     }
     const h = getHandle('cluster:request')
 
-    await expect(h.call(svc, null, true)).resolves.toEqual({ ok: true, enabled: true })
+    await expect(h.call(svc, { sender: { id: 1 } }, true)).resolves.toEqual({
+      ok: true,
+      enabled: true
+    })
 
-    expect(svc.clusterRequested).toBe(true)
+    expect(svc.clusterRequestedBy.size).toBe(1)
     expect(svc.driver.send).toHaveBeenCalledTimes(1)
   })
 
@@ -930,9 +937,12 @@ describe('ProjectionService', () => {
     }
     const h = getHandle('cluster:request')
 
-    await expect(h.call(svc, null, true)).resolves.toEqual({ ok: true, enabled: false })
+    await expect(h.call(svc, { sender: { id: 1 } }, true)).resolves.toEqual({
+      ok: true,
+      enabled: false
+    })
 
-    expect(svc.clusterRequested).toBe(false)
+    expect(svc.clusterRequestedBy.size).toBe(0)
     expect(svc.driver.send).not.toHaveBeenCalled()
   })
 
@@ -2309,7 +2319,7 @@ describe('ProjectionService', () => {
     const svc = new ProjectionService() as any
     const send = vi.fn()
     svc.webContents = { send }
-    svc.clusterRequested = true
+    svc.clusterRequestedBy.add(1)
 
     const msg = new Command(508)
     svc.driver.emit('message', msg)

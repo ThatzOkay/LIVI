@@ -64,7 +64,7 @@ describe('KeyBindingRow', () => {
     })
   })
 
-  test('esc cancels capture and delete resets to default', async () => {
+  test('esc cancels capture and backspace binds as a normal key', async () => {
     render(<KeyBindingRow node={node} />)
 
     fireEvent.click(screen.getByTestId('stack-item'))
@@ -82,7 +82,24 @@ describe('KeyBindingRow', () => {
         ...mockSettings,
         bindings: {
           ...mockSettings.bindings,
-          next: 'ArrowRight'
+          next: 'Backspace'
+        }
+      })
+    })
+  })
+
+  test('unbind icon click clears the binding', async () => {
+    render(<KeyBindingRow node={node} />)
+
+    const buttons = screen.getAllByRole('button')
+    fireEvent.click(buttons[1] as HTMLElement)
+
+    await waitFor(() => {
+      expect(mockSaveSettings).toHaveBeenCalledWith({
+        ...mockSettings,
+        bindings: {
+          ...mockSettings.bindings,
+          next: ''
         }
       })
     })
@@ -92,7 +109,7 @@ describe('KeyBindingRow', () => {
     render(<KeyBindingRow node={node} />)
 
     const buttons = screen.getAllByRole('button')
-    fireEvent.click(buttons[1] as HTMLElement)
+    fireEvent.click(buttons[2] as HTMLElement)
 
     await waitFor(() => {
       expect(mockSaveSettings).toHaveBeenCalled()

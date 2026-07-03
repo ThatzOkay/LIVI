@@ -465,23 +465,6 @@ describe('UsbAoapBridge — non-accessory boot (mode switch + re-enumerate)', ()
     expect(ready).toHaveBeenCalled()
   })
 
-  test('renderer-handshake path skips opening the normal-mode device in this process', async () => {
-    ;(usb.addEventListener as Mock).mockClear()
-    isAccessoryModeMock.mockReturnValue(false)
-    const dev = new MockDevice()
-    const rendererHandshake = vi.fn(async () => 1)
-    createServer.mockImplementationOnce(() => new MockServer())
-    const bridge = new UsbAoapBridge(dev as unknown as Device, undefined, rendererHandshake)
-
-    const startP = bridge.start()
-    await fireAccessoryConnect()
-    await startP
-
-    expect(rendererHandshake).toHaveBeenCalledWith(dev.vendorId, dev.productId)
-    expect(runAoapHandshakeMock).not.toHaveBeenCalled()
-    expect(dev.open).not.toHaveBeenCalled()
-  })
-
   test('invokes the onWillReenumerate hook with a timeout budget', async () => {
     ;(usb.addEventListener as Mock).mockClear()
     isAccessoryModeMock.mockReturnValue(false)

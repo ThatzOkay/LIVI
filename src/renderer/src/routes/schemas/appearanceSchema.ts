@@ -1,4 +1,6 @@
 import type { Config } from '@shared/types'
+import { ColorCalibration } from '../../components/pages/settings/pages/displayCalibration/ColorCalibration'
+import { ContrastGammaCalibration } from '../../components/pages/settings/pages/displayCalibration/ContrastGammaCalibration'
 import { IconUploader } from '../../components/pages/settings/pages/system/iconUploader/IconUploader'
 import { SettingsNode } from '../types'
 
@@ -28,59 +30,92 @@ export const appearanceSchema: SettingsNode<Config> = {
       ],
       page: {
         title: 'Phone Appearance',
-        labelTitle: 'settings.phoneAppearance',
-        description:
-          'Light / dark appearance for the connected phone (Android Auto / CarPlay). Auto follows vehicle data (CAN, ambient sensor, dongle hint). Day or Night force the corresponding appearance on the phone when it connects.',
-        labelDescription: 'settings.phoneAppearanceDescription'
+        labelTitle: 'settings.phoneAppearance'
       }
     },
     {
-      type: 'color',
-      label: 'Primary Color Dark',
-      labelKey: 'settings.primaryColorDark',
-      path: 'primaryColorDark',
-      displayValue: true,
-      page: { title: 'Primary Color Dark', labelTitle: 'settings.primaryColorDark' }
+      type: 'route',
+      label: 'UI Colors',
+      route: 'ui-colors',
+      path: '',
+      children: [
+        {
+          type: 'color',
+          label: 'Primary Color Dark',
+          labelKey: 'settings.primaryColorDark',
+          path: 'primaryColorDark',
+          displayValue: true,
+          page: { title: 'Primary Color Dark', labelTitle: 'settings.primaryColorDark' }
+        },
+        {
+          type: 'color',
+          label: 'Highlight Color Dark',
+          labelKey: 'settings.highlightColorDark',
+          path: 'highlightColorDark',
+          displayValue: true,
+          page: { title: 'Highlight Color Dark', labelTitle: 'settings.highlightColorDark' }
+        },
+        {
+          type: 'color',
+          label: 'Background Color Dark',
+          labelKey: 'settings.backgroundColorDark',
+          path: 'backgroundColorDark',
+          displayValue: true,
+          page: { title: 'Background Color Dark', labelTitle: 'settings.backgroundColorDark' }
+        },
+        {
+          type: 'color',
+          label: 'Primary Color Light',
+          labelKey: 'settings.primaryColorLight',
+          path: 'primaryColorLight',
+          displayValue: true,
+          page: { title: 'Primary Color Light', labelTitle: 'settings.primaryColorLight' }
+        },
+        {
+          type: 'color',
+          label: 'Highlight Color Light',
+          labelKey: 'settings.highlightColorLight',
+          path: 'highlightColorLight',
+          displayValue: true,
+          page: { title: 'Highlight Color Light', labelTitle: 'settings.highlightColorLight' }
+        },
+        {
+          type: 'color',
+          label: 'Background Color Light',
+          labelKey: 'settings.backgroundColorLight',
+          path: 'backgroundColorLight',
+          displayValue: true,
+          page: { title: 'Background Color Light', labelTitle: 'settings.backgroundColorLight' }
+        }
+      ]
     },
     {
-      type: 'color',
-      label: 'Highlight Color Dark',
-      labelKey: 'settings.highlightColorDark',
-      path: 'highlightColorDark',
-      displayValue: true,
-      page: { title: 'Highlight Color Dark', labelTitle: 'settings.highlightColorDark' }
+      type: 'route',
+      label: 'Contrast / Gamma',
+      route: 'display-contrast-gamma',
+      path: '',
+      children: [
+        {
+          type: 'custom',
+          label: 'Contrast / Gamma',
+          path: 'displayGamma',
+          component: ContrastGammaCalibration
+        }
+      ]
     },
     {
-      type: 'color',
-      label: 'Background Color Dark',
-      labelKey: 'settings.backgroundColorDark',
-      path: 'backgroundColorDark',
-      displayValue: true,
-      page: { title: 'Background Color Dark', labelTitle: 'settings.backgroundColorDark' }
-    },
-    {
-      type: 'color',
-      label: 'Primary Color Light',
-      labelKey: 'settings.primaryColorLight',
-      path: 'primaryColorLight',
-      displayValue: true,
-      page: { title: 'Primary Color Light', labelTitle: 'settings.primaryColorLight' }
-    },
-    {
-      type: 'color',
-      label: 'Highlight Color Light',
-      labelKey: 'settings.highlightColorLight',
-      path: 'highlightColorLight',
-      displayValue: true,
-      page: { title: 'Highlight Color Light', labelTitle: 'settings.highlightColorLight' }
-    },
-    {
-      type: 'color',
-      label: 'Background Color Light',
-      labelKey: 'settings.backgroundColorLight',
-      path: 'backgroundColorLight',
-      displayValue: true,
-      page: { title: 'Background Color Light', labelTitle: 'settings.backgroundColorLight' }
+      type: 'route',
+      label: 'Color',
+      route: 'display-color',
+      path: '',
+      children: [
+        {
+          type: 'custom',
+          label: 'Color',
+          path: 'displayColorR',
+          component: ColorCalibration
+        }
+      ]
     },
     {
       type: 'route',

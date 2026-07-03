@@ -3,4 +3,5 @@ export interface DashboardsPaginationProps {
   dotsLength: number
   onSetIndex: (index: number) => void
   isNavbarHidden: boolean
+  isNavPresent?: boolean
 }

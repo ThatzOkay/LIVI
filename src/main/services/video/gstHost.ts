@@ -13,7 +13,8 @@ function crashLogPath(): string {
   return path.join(dir, 'livi-gst-host-crash.log')
 }
 
-// Frame: [uint32 LE len][uint8 op][uint32 LE id][rest]. op 1 create(codec), 2 data, 3 stop.
+// Frame: [uint32 LE len][uint8 op][uint32 LE id][rest]. op 1 create(codec), 2 data, 3 stop,
+// 4 setGamma (5 float64).
 function frame(op: number, id: number, rest: Buffer): Buffer {
   const head = Buffer.allocUnsafe(9)
   head.writeUInt32LE(5 + rest.length, 0)
@@ -75,6 +76,8 @@ class GstHost {
       // LIVI_GST_PRELOAD LD_PRELOADs an override lib into the gst-host child only
       const env = { ...process.env }
       if (process.env.LIVI_GST_PRELOAD) env.LD_PRELOAD = process.env.LIVI_GST_PRELOAD
+      env.GST_GL_WINDOW = 'surfaceless'
+      env.GST_GL_PLATFORM = 'egl'
       this.child = spawn(hostBin, [sockPath, crashPath], {
         env,
         stdio: ['ignore', 'inherit', 'inherit']
@@ -115,6 +118,17 @@ class GstHost {
 
   stop(id: number): void {
     this.send(frame(3, id, Buffer.alloc(0)))
+  }
+
+  // op 4: calibration LUT as 5 little-endian float64 (gamma, contrast, gain R/G/B).
+  setGamma(id: number, gamma: number, contrast: number, r: number, g: number, b: number): void {
+    const rest = Buffer.allocUnsafe(40)
+    rest.writeDoubleLE(gamma, 0)
+    rest.writeDoubleLE(contrast, 8)
+    rest.writeDoubleLE(r, 16)
+    rest.writeDoubleLE(g, 24)
+    rest.writeDoubleLE(b, 32)
+    this.send(frame(4, id, rest))
   }
 }
 

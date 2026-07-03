@@ -16,7 +16,7 @@ const { netConnect, sockets } = vi.hoisted(() => {
 vi.mock('node:net', () => ({ default: { connect: netConnect }, connect: netConnect }))
 
 const { gstHost } = vi.hoisted(() => ({
-  gstHost: { createPlayer: vi.fn(), pushBuffer: vi.fn(), stop: vi.fn() }
+  gstHost: { createPlayer: vi.fn(), pushBuffer: vi.fn(), stop: vi.fn(), setGamma: vi.fn() }
 }))
 vi.mock('../gstHost', () => ({ gstHost }))
 
@@ -37,6 +37,7 @@ const { addon } = vi.hoisted(() => ({
     setVisible: vi.fn(),
     setContentRegion: vi.fn(),
     setBackdrop: vi.fn(),
+    setGamma: vi.fn(),
     stop: vi.fn()
   }
 }))

@@ -24,6 +24,8 @@ function freshHost() {
       }
     }) as Mock,
     setClusterRequested: vi.fn(),
+    isMainClusterWindow: vi.fn(() => true),
+    isClusterRequested: vi.fn(() => false),
     setClusterVisible: vi.fn(),
     resetLastClusterVideoSize: vi.fn(),
     getLastClusterCodec: vi.fn(() => 'h264' as 'h264' | null),
@@ -39,8 +41,8 @@ describe('cluster ipc — cluster:request', () => {
   test('enabled=false sets cluster off and resets size', async () => {
     const host = freshHost()
     registerClusterIpc(host)
-    const r = await handlers.get('cluster:request')!(null, false)
-    expect(host.setClusterRequested).toHaveBeenCalledWith(false)
+    const r = await handlers.get('cluster:request')!({ sender: { id: 1 } }, false)
+    expect(host.setClusterRequested).toHaveBeenCalledWith(1, false)
     expect(host.resetLastClusterVideoSize).toHaveBeenCalled()
     expect(r).toEqual({ ok: true, enabled: false })
   })
@@ -51,8 +53,8 @@ describe('cluster ipc — cluster:request', () => {
       dashboards: { dash3: { main: false, dash: false, aux: false } }
     } as never)
     registerClusterIpc(host)
-    const r = await handlers.get('cluster:request')!(null, true)
-    expect(host.setClusterRequested).toHaveBeenCalledWith(false)
+    const r = await handlers.get('cluster:request')!({ sender: { id: 1 } }, true)
+    expect(host.setClusterRequested).toHaveBeenCalledWith(1, false)
     expect(r).toEqual({ ok: true, enabled: false })
   })
 
@@ -61,7 +63,7 @@ describe('cluster ipc — cluster:request', () => {
     const host = freshHost()
     host.getClusterTargetWebContents.mockReturnValue([wc as never])
     registerClusterIpc(host)
-    const r = await handlers.get('cluster:request')!(null, true)
+    const r = await handlers.get('cluster:request')!({ sender: { id: 1 } }, true)
     expect(wc.send).toHaveBeenCalledWith('projection-event', {
       type: 'cluster-video-codec',
       payload: { codec: 'h264' }
@@ -76,7 +78,7 @@ describe('cluster ipc — cluster:request', () => {
     const wc = { send: vi.fn() }
     host.getClusterTargetWebContents.mockReturnValue([wc as never])
     registerClusterIpc(host)
-    await handlers.get('cluster:request')!(null, true)
+    await handlers.get('cluster:request')!({ sender: { id: 1 } }, true)
     expect(wc.send).not.toHaveBeenCalled()
   })
 
@@ -89,7 +91,7 @@ describe('cluster ipc — cluster:request', () => {
     }
     host.getClusterTargetWebContents.mockReturnValue([wc as never])
     registerClusterIpc(host)
-    await expect(handlers.get('cluster:request')!(null, true)).resolves.toEqual({
+    await expect(handlers.get('cluster:request')!({ sender: { id: 1 } }, true)).resolves.toEqual({
       ok: true,
       enabled: true
     })
@@ -101,7 +103,7 @@ describe('cluster ipc — cluster:request', () => {
       throw new Error('not started')
     })
     registerClusterIpc(host)
-    await expect(handlers.get('cluster:request')!(null, true)).resolves.toEqual({
+    await expect(handlers.get('cluster:request')!({ sender: { id: 1 } }, true)).resolves.toEqual({
       ok: true,
       enabled: true
     })
@@ -114,7 +116,7 @@ describe('cluster ipc — cluster:request', () => {
     host.getClusterTargetWebContents.mockReturnValue([wc as never])
     registerClusterIpc(host)
 
-    await handlers.get('cluster:request')!(null, true)
+    await handlers.get('cluster:request')!({ sender: { id: 1 } }, true)
 
     expect(wc.send).toHaveBeenCalledWith('cluster-video-resolution', { width: 800, height: 480 })
   })

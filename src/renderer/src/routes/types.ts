@@ -24,8 +24,6 @@ export type NodeMeta = {
   page?: {
     title?: string
     labelTitle?: string
-    description?: string
-    labelDescription?: string
   }
   displayValue?: boolean
   displayValueUnit?: string

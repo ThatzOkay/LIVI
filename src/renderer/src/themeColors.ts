@@ -31,14 +31,6 @@ export const themeColors = {
   dividerLight: '#cccccc',
   dividerDark: '#444444',
 
-  // FFT surface backgrounds
-  fftSurfaceLight: 'transparent',
-  fftSurfaceDark: 'rgba(0,0,0,0.55)',
-
-  // Soften grid perception on dark backgrounds
-  fftSurfaceBorderLight: 'rgba(0,0,0,0.08)',
-  fftSurfaceBorderDark: 'rgba(255,255,255,0.05)',
-
   // Artwork surface backgrounds
   artworkSurfaceLight: 'rgba(0,0,0,0.06)',
   artworkSurfaceDark: 'rgba(255,255,255,0.06)',

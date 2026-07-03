@@ -33,6 +33,7 @@ export function SoftwareUpdate() {
   const [error, setError] = useState<string>('')
 
   const [inFlight, setInFlight] = useState(false)
+  const [installStarting, setInstallStarting] = useState(false)
 
   const installedSem = parseSemver(installedVersion)
   const latestSem = parseSemver(latestVersion)
@@ -51,6 +52,7 @@ export function SoftwareUpdate() {
     setError('')
     setPhase(UpdatePhases.start)
     setInFlight(false)
+    setInstallStarting(false)
   }, [])
 
   const handleCloseAndReset = useCallback(() => {
@@ -238,7 +240,15 @@ export function SoftwareUpdate() {
           </Button>
 
           {phase === 'ready' && (
-            <Button variant="contained" onClick={() => window.app?.beginInstall?.()}>
+            <Button
+              variant="contained"
+              disabled={installStarting}
+              onClick={() => {
+                if (installStarting) return
+                setInstallStarting(true)
+                window.app?.beginInstall?.()
+              }}
+            >
               {t('softwareUpdate.installNow')}
             </Button>
           )}

@@ -1,4 +1,4 @@
-import { MenuItem, Select, Slider, Switch, TextField } from '@mui/material'
+import { Box, Slider, Switch, TextField, Typography } from '@mui/material'
 import { useLiviStore } from '@renderer/store/store'
 import type { Config } from '@shared/types'
 import { useEffect, useState } from 'react'
@@ -9,6 +9,7 @@ import { ColorPickerControl } from './colorPicker/ColorPickerControl'
 import { extractBtMac, withGhostOption } from './ghostOption'
 import NumberSpinner from './numberSpinner/numberSpinner'
 import { getCachedOptions, resolveOptions } from './selectOptionsCache'
+import { StackItem } from './stackItem'
 
 type Props<T> = {
   node: SettingsNode<Config>
@@ -16,6 +17,7 @@ type Props<T> = {
   onChange: (v: T) => void
   savedLabel?: string
   onLabelChange?: (label: string) => void
+  onDone?: () => void
 }
 
 const clampInt = (n: number, min: number, max: number, step = 1) => {
@@ -36,7 +38,8 @@ export const SettingsFieldControl = <T,>({
   value,
   onChange,
   savedLabel,
-  onLabelChange
+  onLabelChange,
+  onDone
 }: Props<T>) => {
   switch (node.type) {
     case 'string':
@@ -118,6 +121,7 @@ export const SettingsFieldControl = <T,>({
           onChange={onChange as (v: unknown) => void}
           savedLabel={savedLabel}
           onLabelChange={onLabelChange}
+          onDone={onDone}
         />
       )
 
@@ -135,9 +139,17 @@ type DynamicSelectProps = {
   onChange: (v: unknown) => void
   savedLabel?: string
   onLabelChange?: (label: string) => void
+  onDone?: () => void
 }
 
-function DynamicSelect({ node, value, onChange, savedLabel, onLabelChange }: DynamicSelectProps) {
+function DynamicSelect({
+  node,
+  value,
+  onChange,
+  savedLabel,
+  onLabelChange,
+  onDone
+}: DynamicSelectProps) {
   const { t } = useTranslation()
   const audioDevicesRevision = useLiviStore((s) => s.audioDevicesRevision)
   const [options, setOptions] = useState<SelectOption[]>(
@@ -206,31 +218,33 @@ function DynamicSelect({ node, value, onChange, savedLabel, onLabelChange }: Dyn
   }
 
   const selectedValue = inList ? value : ''
-  const selectedOption = renderedOptions.find((o) => o.value === selectedValue)
 
+  // Flat list instead of a dropdown: one tap selects, selected row gets a dot marker, then close.
   return (
-    <Select
-      size="small"
-      variant="outlined"
-      value={selectedValue}
-      displayEmpty
-      renderValue={() => (selectedOption ? labelFor(selectedOption) : '')}
-      sx={{
-        minWidth: 200,
-        '&.Mui-focused .MuiOutlinedInput-notchedOutline': {
-          borderColor: 'primary.main',
-          borderWidth: '1px'
-        }
-      }}
-      onChange={(e) => handlePick(e.target.value as string | number)}
-    >
+    <Box sx={{ width: '100%' }}>
       {renderedOptions.map((o) => {
+        const selected = o.value === selectedValue
         return (
-          <MenuItem key={String(o.value)} value={o.value}>
-            {labelFor(o)}
-          </MenuItem>
+          <StackItem
+            key={String(o.value)}
+            onClick={() => {
+              handlePick(o.value)
+              onDone?.()
+            }}
+          >
+            <Typography>{labelFor(o)}</Typography>
+            <Box
+              sx={{
+                flex: 'none',
+                width: 'clamp(8px, 1.6svh, 12px)',
+                height: 'clamp(8px, 1.6svh, 12px)',
+                borderRadius: '50%',
+                bgcolor: selected ? 'primary.main' : 'transparent'
+              }}
+            />
+          </StackItem>
         )
       })}
-    </Select>
+    </Box>
   )
 }

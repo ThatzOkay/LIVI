@@ -205,7 +205,6 @@ export const Media = ({ forceHydrate = false }: MediaProps = {}) => {
   const pct = Math.round(progress * 1000) / 10
 
   const iconPx = Math.round(ctrlSize * 0.46)
-  const iconMainPx = Math.round(ctrlSize * 0.52)
 
   // Slightly reduce side padding for text on tiny screens
   const textSidePad = Math.max(6, Math.round(pagePadClamped * 0.75))
@@ -314,7 +313,10 @@ export const Media = ({ forceHydrate = false }: MediaProps = {}) => {
         display: 'flex',
         flexDirection: 'column',
         minHeight: 0,
-        padding: pagePadClamped,
+        paddingTop: pagePadClamped,
+        paddingLeft: pagePadClamped,
+        paddingRight: pagePadClamped,
+        paddingBottom: isTinyHeight ? 2 : pagePadClamped,
         boxSizing: 'border-box',
         overflow: 'hidden'
       }}
@@ -455,8 +457,8 @@ export const Media = ({ forceHydrate = false }: MediaProps = {}) => {
         style={{
           display: 'grid',
           gridAutoRows: 'auto',
-          rowGap: isTinyHeight ? 8 : 10,
-          paddingBottom: isTinyHeight ? 6 : '1rem',
+          rowGap: isTinyHeight ? 3 : 4,
+          paddingBottom: isTinyHeight ? 0 : '0.5rem',
           width: '100%',
           boxSizing: 'border-box'
         }}
@@ -477,7 +479,6 @@ export const Media = ({ forceHydrate = false }: MediaProps = {}) => {
             press={press}
             focus={focus}
             iconPx={iconPx}
-            iconMainPx={iconMainPx}
           />
         </div>
 

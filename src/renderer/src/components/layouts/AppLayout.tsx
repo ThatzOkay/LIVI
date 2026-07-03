@@ -31,6 +31,8 @@ export const AppLayout: FC<PropsWithChildren<AppLayoutProps>> = ({
   // Time + Wi-Fi widget only on the Main window
   const isVisibleTimeAndWifi =
     getWindowRole() === 'main' && window.innerHeight > UI.MIN_HEIGHT_SHOW_TIME_WIFI
+  const isXSIcons = typeof window !== 'undefined' && window.innerHeight <= UI.XS_ICON_MAX_HEIGHT
+  const clockFontSize = isXSIcons ? '1rem' : '1.5rem'
 
   const inAutoHideNavPage = pathname === ROUTES.CLUSTER || pathname === ROUTES.TELEMETRY
 
@@ -69,6 +71,7 @@ export const AppLayout: FC<PropsWithChildren<AppLayoutProps>> = ({
           id="nav-root"
           style={{
             height: '100%',
+            width: isXSIcons ? 56 : undefined,
             display: 'flex',
             flexDirection: 'column',
             borderRight: isRhd ? undefined : '1px solid #444',
@@ -94,7 +97,7 @@ export const AppLayout: FC<PropsWithChildren<AppLayoutProps>> = ({
               }}
             >
               <Box sx={{ display: 'flex', alignItems: 'center', flexDirection: 'column' }}>
-                <Typography style={{ fontSize: '1.5rem' }}>{time}</Typography>
+                <Typography style={{ fontSize: clockFontSize }}>{time}</Typography>
 
                 <div>
                   {network.type === 'wifi' ? (
@@ -119,6 +122,7 @@ export const AppLayout: FC<PropsWithChildren<AppLayoutProps>> = ({
         ref={mainRef}
         id="content-root"
         data-nav-hidden={hideNav || singleTab ? '1' : '0'}
+        data-nav-present={singleTab ? '0' : '1'}
         style={{
           flex: 1,
           minWidth: 0,

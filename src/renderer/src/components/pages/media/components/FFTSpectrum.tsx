@@ -7,12 +7,19 @@ import { createFftWorker } from './createFftWorker'
 // Configuration
 const POINTS = 24
 const FFT_SIZE = 4096
-const LABEL_FONT_SIZE = 16
-const MARGIN_BOTTOM = 16
+const LABEL_FONT_MAX = 16
+const LABEL_FONT_MIN = 9
 const MIN_FREQ = 20
 const MAX_FREQ = 20000
-const SPECTRUM_WIDTH_RATIO = 0.92
-const TARGET_FPS = 30
+const SPECTRUM_WIDTH_RATIO = 1.0
+const TARGET_FPS = 60
+
+// Label font scales with spectrum width; below LABEL_FONT_MIN labels are dropped and the margin freed.
+const labelMetrics = (specW: number) => {
+  const font = Math.min(LABEL_FONT_MAX, Math.floor(specW / 12))
+  const show = font >= LABEL_FONT_MIN
+  return { font, show, marginBottom: show ? font + 4 : 0 }
+}
 
 export const normalizePcmBuffer = (pcm: Float32Array | ArrayLike<number>) => {
   return pcm instanceof Float32Array ? pcm.slice() : new Float32Array(pcm)
@@ -105,8 +112,9 @@ export const FFTSpectrum = () => {
     if (!bg || dimensions.width === 0) return
     const ctx = bg.getContext('2d')!
     const { width: cw, height: ch } = dimensions
-    const usableH = ch - MARGIN_BOTTOM
     const specW = cw * SPECTRUM_WIDTH_RATIO
+    const { font: labelFont, show: showLabels, marginBottom } = labelMetrics(specW)
+    const usableH = ch - marginBottom
     const xOff = (cw - specW) / 2
     bg.width = cw
     bg.height = ch
@@ -126,27 +134,48 @@ export const FFTSpectrum = () => {
       ctx.stroke()
     })
 
-    const freqs = [MIN_FREQ, 100, 500, 1000, 5000, 10000, MAX_FREQ]
-    ctx.font = `${LABEL_FONT_SIZE}px sans-serif`
-    ctx.textAlign = 'center'
-    ctx.textBaseline = 'top'
-    ctx.fillStyle = labelColor
-
+    const freqs = [MIN_FREQ, 100, 1000, 10000, MAX_FREQ]
     const logMin = Math.log10(MIN_FREQ)
     const logMax = Math.log10(MAX_FREQ)
     const logDen = logMax - logMin
 
-    freqs.forEach((freq) => {
-      const pos = (Math.log10(freq) - logMin) / logDen
-      const x = xOff + pos * specW
+    const positions = freqs.map((freq) => ({
+      freq,
+      x: xOff + ((Math.log10(freq) - logMin) / logDen) * specW
+    }))
+
+    positions.forEach(({ x }) => {
       ctx.strokeStyle = majorLine
       ctx.beginPath()
       ctx.moveTo(x, 0)
       ctx.lineTo(x, usableH)
       ctx.stroke()
-      const label = freq >= 1000 ? `${freq / 1000}k` : `${freq}`
-      ctx.fillText(label, x, usableH + 2)
     })
+
+    if (showLabels) {
+      ctx.font = `${labelFont}px sans-serif`
+      ctx.textBaseline = 'top'
+      ctx.fillStyle = labelColor
+      const gap = labelFont * 0.5
+      const items = positions.map(({ freq, x }, i) => {
+        const label = freq >= 1000 ? `${freq / 1000}k` : `${freq}`
+        const w = ctx.measureText(label).width
+        const align: CanvasTextAlign =
+          i === 0 ? 'left' : i === positions.length - 1 ? 'right' : 'center'
+        const left = align === 'left' ? x : align === 'right' ? x - w : x - w / 2
+        return { label, x, align, left, right: left + w }
+      })
+      // Right-to-left pass: draw a label only if it clears the last drawn one.
+      let lastLeft = Infinity
+      for (let i = items.length - 1; i >= 0; i--) {
+        const it = items[i]
+        if (it.right <= lastLeft - gap) {
+          ctx.textAlign = it.align
+          ctx.fillText(it.label, it.x, usableH + 2)
+          lastLeft = it.left
+        }
+      }
+    }
   }, [dimensions, sampleRate, gridFill, gridLine, majorLine, labelColor])
 
   useEffect(() => {
@@ -170,8 +199,8 @@ export const FFTSpectrum = () => {
       }
 
       ctx.clearRect(0, 0, cw, ch)
-      const usableH = ch - MARGIN_BOTTOM
       const specW = cw * SPECTRUM_WIDTH_RATIO
+      const usableH = ch - labelMetrics(specW).marginBottom
       const xOff = (cw - specW) / 2
       const barW = specW / POINTS
       const bins = binsRef.current

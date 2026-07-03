@@ -79,7 +79,7 @@ function buildTheme(mode: THEME.LIGHT | THEME.DARK, bg?: string) {
             '--ui-breathe-dur': '1350ms'
           },
           '.fft-surface': {
-            backgroundColor: isLight ? themeColors.fftSurfaceLight : themeColors.fftSurfaceDark,
+            backgroundColor: 'transparent',
             ...(isLight
               ? {}
               : {

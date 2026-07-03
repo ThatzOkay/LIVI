@@ -34,7 +34,6 @@ type ControlsProps = {
     prev?: boolean
   }
   iconPx: number
-  iconMainPx: number
 }
 
 export const Controls = ({
@@ -50,8 +49,7 @@ export const Controls = ({
   uiPlaying,
   press,
   focus,
-  iconPx,
-  iconMainPx
+  iconPx
 }: ControlsProps) => {
   const theme = useTheme()
   const ringColor = theme.palette.primary.main
@@ -87,7 +85,7 @@ export const Controls = ({
           display: 'flex',
           gap: ctrlGap,
           alignItems: 'center',
-          height: Math.round(ctrlSize * 1.1)
+          height: ctrlSize
         }}
       >
         {/* PREVIOUS */}
@@ -119,7 +117,7 @@ export const Controls = ({
           onClick={onPlayPause}
           aria-label="Play/Pause"
           aria-pressed={uiPlaying}
-          style={circleBtnStyle(Math.round(ctrlSize * 1.1), {
+          style={circleBtnStyle(ctrlSize, {
             pressed: !!press.play,
             focused: !!focus.play,
             hovered: hover.play,
@@ -127,11 +125,11 @@ export const Controls = ({
           })}
         >
           {uiPlaying ? (
-            <PauseIcon sx={{ fontSize: iconMainPx, display: 'block', lineHeight: 0 }} />
+            <PauseIcon sx={{ fontSize: iconPx, display: 'block', lineHeight: 0 }} />
           ) : (
             <PlayArrowIcon
               sx={{
-                fontSize: iconMainPx,
+                fontSize: iconPx,
                 display: 'block',
                 lineHeight: 0,
                 transform: 'translateX(1px)'

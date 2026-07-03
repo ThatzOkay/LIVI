@@ -22,7 +22,12 @@ import { loadConfig } from './config/loadConfig'
 import { restartApp } from './ipc/app'
 import { USBService } from './services/usb/USBService'
 import { checkAndInstallUdevRule } from './services/usb/udevRule'
-import { backdropHex, setCompositorBackdrop, setMacBackdrop } from './services/video/GstVideo'
+import {
+  backdropHex,
+  setCompositorBackdrop,
+  setMacBackdrop,
+  setStreamGamma
+} from './services/video/GstVideo'
 import { createMainWindow, getMainWindow } from './window/createWindow'
 import { setupSecondaryWindows } from './window/secondaryWindows'
 
@@ -83,6 +88,19 @@ app.whenReady().then(async () => {
   }
   applyBackdrop(runtimeState.config)
   configEvents.on('changed', (next: Config) => applyBackdrop(next))
+
+  // video stream calibration, applied now and on every config change
+  const applyGamma = (cfg: Config): void => {
+    setStreamGamma(
+      cfg.displayGamma,
+      cfg.displayContrast,
+      cfg.displayColorR,
+      cfg.displayColorG,
+      cfg.displayColorB
+    )
+  }
+  applyGamma(runtimeState.config)
+  configEvents.on('changed', (next: Config) => applyGamma(next))
   setupTelemetry({
     store: telemetryStore,
     projectionService,

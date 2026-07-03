@@ -1,3 +1,4 @@
+import CloseOutlinedIcon from '@mui/icons-material/CloseOutlined'
 import RestartAltOutlinedIcon from '@mui/icons-material/RestartAltOutlined'
 import { Box, IconButton, Modal, Paper, Typography } from '@mui/material'
 import type { KeyBindingNode } from '@renderer/routes/types'
@@ -44,6 +45,17 @@ export function KeyBindingRow({ node }: { node: KeyBindingNode }) {
   const settings = useLiviStore((s) => s.settings) as Config | null
 
   const [capturing, setCapturing] = useState(false)
+  const [layoutMap, setLayoutMap] = useState<Map<string, string> | null>(null)
+
+  // Resolve physical key codes (event.code) to the active keyboard layout
+  useEffect(() => {
+    const kb = (
+      navigator as unknown as { keyboard?: { getLayoutMap?: () => Promise<Map<string, string>> } }
+    ).keyboard
+    kb?.getLayoutMap?.()
+      .then(setLayoutMap)
+      .catch(() => {})
+  }, [])
 
   const currentValue = useMemo(() => {
     return normalize(settings?.bindings?.[node.bindingKey])
@@ -66,7 +78,16 @@ export function KeyBindingRow({ node }: { node: KeyBindingNode }) {
     return currentValue === defaultValue
   }, [currentValue, defaultValue, hasDefault])
 
-  const displayValue = capturing ? 'Press a key…' : currentValue || '---'
+  const keyLabel = useCallback(
+    (code: string) => {
+      const mapped = layoutMap?.get(code)
+      if (mapped) return mapped.length === 1 ? mapped.toUpperCase() : mapped
+      return code
+    },
+    [layoutMap]
+  )
+
+  const displayValue = capturing ? 'Press a key…' : currentValue ? keyLabel(currentValue) : '---'
 
   const applyValue = useCallback(
     async (code: string) => {
@@ -103,12 +124,6 @@ export function KeyBindingRow({ node }: { node: KeyBindingNode }) {
         return
       }
 
-      if (e.key === 'Backspace' || e.key === 'Delete') {
-        if (hasDefault) void reset()
-        setCapturing(false)
-        return
-      }
-
       const code = e.code
       if (!code || isModifierOnly(code)) return
 
@@ -118,7 +133,7 @@ export function KeyBindingRow({ node }: { node: KeyBindingNode }) {
 
     document.addEventListener('keydown', onKeyDown, true)
     return () => document.removeEventListener('keydown', onKeyDown, true)
-  }, [applyValue, capturing, hasDefault, reset])
+  }, [applyValue, capturing])
 
   const label = node.labelKey ? t(node.labelKey) : node.label
 
@@ -127,12 +142,27 @@ export function KeyBindingRow({ node }: { node: KeyBindingNode }) {
       <StackItem node={node} onClick={() => setCapturing(true)}>
         <p>{label}</p>
 
-        {/* Right side: value + reset */}
+        {/* Right side: value + unbind + reset */}
         <Box sx={{ display: 'flex', alignItems: 'center', gap: 1, whiteSpace: 'nowrap' }}>
           <Box sx={{ fontSize: 'clamp(0.85rem, 2.0svh, 0.95rem)' }}>{displayValue}</Box>
 
           <IconButton
             size="small"
+            tabIndex={-1}
+            disabled={!currentValue}
+            onClick={(e) => {
+              e.preventDefault()
+              e.stopPropagation()
+              setCapturing(false)
+              void applyValue('')
+            }}
+          >
+            <CloseOutlinedIcon fontSize="small" />
+          </IconButton>
+
+          <IconButton
+            size="small"
+            tabIndex={-1}
             disabled={!hasDefault || isDefault}
             onClick={(e) => {
               e.preventDefault()
@@ -149,15 +179,10 @@ export function KeyBindingRow({ node }: { node: KeyBindingNode }) {
       <Modal open={capturing} onClose={() => setCapturing(false)}>
         <Box sx={modalBoxSx}>
           <Paper sx={{ p: 2.5 }}>
-            <Typography variant="h6">Press a key for “{node.label}”</Typography>
+            <Typography variant="h6">Press a key for &ldquo;{node.label}&rdquo;</Typography>
             <Typography variant="body2" sx={{ mt: 1 }}>
               Press Esc to cancel.
             </Typography>
-            {hasDefault && (
-              <Typography variant="body2" sx={{ mt: 0.5 }}>
-                Press Backspace/Delete to reset.
-              </Typography>
-            )}
           </Paper>
         </Box>
       </Modal>

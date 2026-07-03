@@ -19,6 +19,11 @@ function hexToRgb255(hex: string): [number, number, number] {
 const useHostProcess = process.platform === 'linux'
 let nextPlayerId = 1
 
+// Display calibration applied as a glshader pass in each video pipeline.
+type GammaState = { gamma: number; contrast: number; r: number; g: number; b: number }
+let currentGamma: GammaState = { gamma: 1, contrast: 1, r: 1, g: 1, b: 1 }
+const livePlayers = new Set<GstVideo>()
+
 // Linux: control channel to livi-compositor. Video planes are addressed by tag (claim),
 // then placed (videocfg) and toggled (videoshow). `state` is resent on reconnect.
 class CompositorControl {
@@ -83,6 +88,13 @@ class CompositorControl {
     this.flush()
   }
 
+  // Push the display calibration to the compositor's per-video shader pass.
+  gamma(gamma: number, contrast: number, r: number, g: number, b: number): void {
+    if (!this.enabled) return
+    this.state.set('__gamma__', `gamma ${gamma} ${contrast} ${r} ${g} ${b}\n`)
+    this.flush()
+  }
+
   // Ask the compositor to relaunch its inner UI child (the Electron app). One-shot, not resent on reconnect.
   restart(): boolean {
     if (!this.enabled) return false
@@ -133,6 +145,19 @@ export function setCompositorBackdrop(hex: string): void {
   compositorControl.setBackdrop(hex)
 }
 
+// Push the display calibration into every live video pipeline's glshader pass (all platforms).
+export function setStreamGamma(
+  gamma: number,
+  contrast: number,
+  r: number,
+  g: number,
+  b: number
+): void {
+  currentGamma = { gamma, contrast, r, g, b }
+  if (useHostProcess) compositorControl.gamma(gamma, contrast, r, g, b)
+  for (const p of livePlayers) p.applyGamma()
+}
+
 // macOS only: paint the window's content view (below the video subviews) with the theme colour
 export function setMacBackdrop(win: BrowserWindow, hex: string): void {
   if (process.platform !== 'darwin') return
@@ -179,6 +204,7 @@ interface GstAddon {
     tierH: number
   ): void
   setBackdrop(windowHandle: Buffer, r: number, g: number, b: number): void
+  setGamma(player: unknown, gamma: number, contrast: number, r: number, g: number, b: number): void
   stop(player: unknown): void
 }
 
@@ -260,7 +286,19 @@ export class GstVideo {
     private readonly wc: WebContents,
     private readonly role: string = 'main',
     private readonly targetScreen: string = 'main'
-  ) {}
+  ) {
+    livePlayers.add(this)
+  }
+
+  // Apply the current calibration to this player's glshader pass. Re-sent after each (re)create.
+  applyGamma(): void {
+    const { gamma, contrast, r, g, b } = currentGamma
+    if (useHostProcess) {
+      compositorControl.gamma(gamma, contrast, r, g, b)
+      return
+    }
+    if (addon && this.player) addon.setGamma(this.player, gamma, contrast, r, g, b)
+  }
 
   private windowHandle(): Buffer | null {
     const win = BrowserWindow.fromWebContents(this.wc)
@@ -276,6 +314,7 @@ export class GstVideo {
       gstHost.createPlayer(this.id, codec)
       this.codec = codec
       this.started = true
+      this.applyGamma()
       return
     }
     const a = load()
@@ -291,6 +330,7 @@ export class GstVideo {
       a.start(this.player)
       a.setVisible(this.player, this.visible)
       if (this.region) this.applyRegion(a)
+      this.applyGamma()
     }
   }
 

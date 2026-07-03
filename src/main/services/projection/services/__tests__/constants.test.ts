@@ -1,7 +1,6 @@
 import { MediaType, NavigationMetaType } from '../../messages'
 import {
   APP_START_TS,
-  DEFAULT_MEDIA_COVER_IMAGE,
   DEFAULT_MEDIA_DATA_RESPONSE,
   DEFAULT_NAVIGATION_DATA_RESPONSE
 } from '../constants'
@@ -11,12 +10,6 @@ describe('projection service constants', () => {
     expect(typeof APP_START_TS).toBe('number')
     expect(Number.isFinite(APP_START_TS)).toBe(true)
     expect(APP_START_TS).toBeGreaterThan(0)
-  })
-
-  test('DEFAULT_MEDIA_COVER_IMAGE is a non-empty base64 string', () => {
-    expect(typeof DEFAULT_MEDIA_COVER_IMAGE).toBe('string')
-    expect(DEFAULT_MEDIA_COVER_IMAGE.length).toBeGreaterThan(0)
-    expect(DEFAULT_MEDIA_COVER_IMAGE.startsWith('iVBOR')).toBe(true)
   })
 
   test('DEFAULT_MEDIA_DATA_RESPONSE contains the expected default media payload', () => {
@@ -34,7 +27,6 @@ describe('projection service constants', () => {
           MediaPlayStatus: 1,
           MediaLyrics: '-'
         },
-        base64Image: DEFAULT_MEDIA_COVER_IMAGE,
         error: true
       }
     })
@@ -57,7 +49,7 @@ describe('projection service constants', () => {
     expect(DEFAULT_NAVIGATION_DATA_RESPONSE.payload.error).toBe(true)
   })
 
-  test('default media response uses the shared default cover image constant', () => {
-    expect(DEFAULT_MEDIA_DATA_RESPONSE.payload.base64Image).toBe(DEFAULT_MEDIA_COVER_IMAGE)
+  test('default media response has no cover image so the UI shows "No Artwork"', () => {
+    expect(DEFAULT_MEDIA_DATA_RESPONSE.payload.base64Image).toBeUndefined()
   })
 })

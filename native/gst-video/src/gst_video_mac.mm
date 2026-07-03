@@ -3,16 +3,15 @@
 #import <QuartzCore/QuartzCore.h>
 #include <math.h>
 
-// Clip view: sized to the AA content rectangle (the user-chosen AR the phone renders
-// inside the 16:9 transport tier), centered in the window, clipping its child
+// Clip view: sized to the content rectangle
 @interface LIVIClipView : NSView {
 @public
   NSView* _gl;  // the GL sink's render target (child view)
   double _cropL, _cropT, _visW, _visH, _tierW, _tierH;  // content region in tier px
 @private
-  BOOL _relayoutPending;  // coalesce deferred relayouts during a live window resize
-  BOOL _inLiveResize;     // window is in an interactive drag-resize (plane suspended)
-  BOOL _userHidden;       // logical visibility from livi_set_view_hidden (restored after resize)
+  BOOL _relayoutPending;
+  BOOL _inLiveResize;
+  BOOL _userHidden;
 }
 - (void)relayout;
 - (void)setUserHidden:(BOOL)hidden;
@@ -43,20 +42,13 @@
   const double cdh = _visH * scale;
   [self setFrame:NSMakeRect((ww - cdw) / 2.0, (wh - cdh) / 2.0, cdw, cdh)];
 
-  // Child = whole tier scaled by `scale`, shifted so the content (at cropL/cropT inside
-  // the tier) sits at the clip origin. The clip view bounds clip the margins
   [_gl setFrame:NSMakeRect(-_cropL * scale, -_cropT * scale, _tierW * scale, _tierH * scale)];
 }
 
 - (void)superviewResized:(NSNotification*)note {
   (void)note;
-  // While the window is in an interactive live resize the plane is hidden and we relayout once at
-  // the end (windowDidEndLiveResize:), so skip the per-frame churn entirely here.
+  // While the window is in an interactive live resize the plane is hidden
   if (_inLiveResize) return;
-  // Defer + coalesce. Changing our frame synchronously inside AppKit's live window resize trips
-  // the NSView visible-rect cache assertion (-[NSView setFrameSize:] ->
-  // NSViewHierarchyInvalidateVisibleRect), which aborts on drag-resize. Running the relayout on
-  // the next main-loop turn keeps it out of AppKit's in-progress resize pass.
   if (_relayoutPending) return;
   _relayoutPending = YES;
   dispatch_async(dispatch_get_main_queue(), ^{
@@ -110,7 +102,7 @@ extern "C" guintptr livi_attach_view(guintptr parent, void** outView) {
                                                name:NSViewFrameDidChangeNotification
                                              object:p];
 
-  // Suspend the plane during an interactive window drag-resize (see windowWillStartLiveResize:).
+  // Suspend the plane during an interactive window drag-resize
   NSWindow* win = [p window];
   if (win) {
     NSNotificationCenter* nc = [NSNotificationCenter defaultCenter];
@@ -124,12 +116,11 @@ extern "C" guintptr livi_attach_view(guintptr parent, void** outView) {
              object:win];
   }
 
-  *outView = (void*)clip;       // tracked view; region/hide/remove operate on the clip
+  *outView = (void*)clip;       // tracked view
   return (guintptr)(void*)gl;   // the GL sink renders into the child
 }
 
-// Set the AA content region (crop offsets + visible size within the decoded tier) and
-// re-lay-out. cropL=0/visW=0 disables cropping (child fills the window)
+// Set the content region (crop) and re-lay-out
 extern "C" void livi_set_content_region(void* view, void* sink, double cropL,
     double cropT, double visW, double visH, double tierW, double tierH) {
   (void)sink;

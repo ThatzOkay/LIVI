@@ -40,9 +40,7 @@ export const videoSchema: SettingsNode<Config> = {
           displayValue: true,
           page: {
             title: 'Main Video Width',
-            labelTitle: 'settings.projectionWidth',
-            description: 'Main stream width in px',
-            labelDescription: 'settings.projectionWidthDescription'
+            labelTitle: 'settings.projectionWidth'
           }
         },
         {
@@ -56,9 +54,7 @@ export const videoSchema: SettingsNode<Config> = {
           displayValue: true,
           page: {
             title: 'Main Video Height',
-            labelTitle: 'settings.projectionHeight',
-            description: 'Main stream height in px',
-            labelDescription: 'settings.projectionHeightDescription'
+            labelTitle: 'settings.projectionHeight'
           }
         },
         {
@@ -72,9 +68,7 @@ export const videoSchema: SettingsNode<Config> = {
           displayValue: true,
           page: {
             title: 'Main Video FPS',
-            labelTitle: 'settings.projectionFps',
-            description: 'Main stream FPS',
-            labelDescription: 'settings.projectionFpsDescription'
+            labelTitle: 'settings.projectionFps'
           }
         },
         {
@@ -88,9 +82,7 @@ export const videoSchema: SettingsNode<Config> = {
           displayValue: true,
           page: {
             title: 'Main Video DPI',
-            labelTitle: 'settings.projectionDpi',
-            description: 'Main stream DPI (0 = auto)',
-            labelDescription: 'settings.projectionDpiDescription'
+            labelTitle: 'settings.projectionDpi'
           }
         },
         {
@@ -111,9 +103,7 @@ export const videoSchema: SettingsNode<Config> = {
               displayValue: true,
               page: {
                 title: 'Main Screen View Area Top',
-                labelTitle: 'settings.top',
-                description: 'Top inset in px',
-                labelDescription: 'settings.viewAreaTopDescription'
+                labelTitle: 'settings.top'
               }
             },
             {
@@ -127,9 +117,7 @@ export const videoSchema: SettingsNode<Config> = {
               displayValue: true,
               page: {
                 title: 'Main Screen View Area Bottom',
-                labelTitle: 'settings.bottom',
-                description: 'Bottom inset in px',
-                labelDescription: 'settings.viewAreaBottomDescription'
+                labelTitle: 'settings.bottom'
               }
             },
             {
@@ -143,9 +131,7 @@ export const videoSchema: SettingsNode<Config> = {
               displayValue: true,
               page: {
                 title: 'Main Screen View Area Left',
-                labelTitle: 'settings.left',
-                description: 'Left inset in px',
-                labelDescription: 'settings.viewAreaLeftDescription'
+                labelTitle: 'settings.left'
               }
             },
             {
@@ -159,9 +145,7 @@ export const videoSchema: SettingsNode<Config> = {
               displayValue: true,
               page: {
                 title: 'Main Screen View Area Right',
-                labelTitle: 'settings.right',
-                description: 'Right inset in px',
-                labelDescription: 'settings.viewAreaRightDescription'
+                labelTitle: 'settings.right'
               }
             }
           ]
@@ -184,9 +168,7 @@ export const videoSchema: SettingsNode<Config> = {
               displayValue: true,
               page: {
                 title: 'Main Screen Safe Area Top',
-                labelTitle: 'settings.top',
-                description: 'Top inset in px',
-                labelDescription: 'settings.safeAreaTopDescription'
+                labelTitle: 'settings.top'
               }
             },
             {
@@ -200,9 +182,7 @@ export const videoSchema: SettingsNode<Config> = {
               displayValue: true,
               page: {
                 title: 'Main Screen Safe Area Bottom',
-                labelTitle: 'settings.bottom',
-                description: 'Bottom inset in px',
-                labelDescription: 'settings.safeAreaBottomDescription'
+                labelTitle: 'settings.bottom'
               }
             },
             {
@@ -216,9 +196,7 @@ export const videoSchema: SettingsNode<Config> = {
               displayValue: true,
               page: {
                 title: 'Main Screen Safe Area Left',
-                labelTitle: 'settings.left',
-                description: 'Left inset in px',
-                labelDescription: 'settings.safeAreaLeftDescription'
+                labelTitle: 'settings.left'
               }
             },
             {
@@ -232,9 +210,7 @@ export const videoSchema: SettingsNode<Config> = {
               displayValue: true,
               page: {
                 title: 'Main Screen Safe Area Right',
-                labelTitle: 'settings.right',
-                description: 'Right inset in px',
-                labelDescription: 'settings.safeAreaRightDescription'
+                labelTitle: 'settings.right'
               }
             },
             {
@@ -265,9 +241,7 @@ export const videoSchema: SettingsNode<Config> = {
           displayValue: true,
           page: {
             title: 'Cluster Video Width',
-            labelTitle: 'settings.clusterWidth',
-            description: 'Cluster screen width in px',
-            labelDescription: 'settings.clusterScreenWidthDescription'
+            labelTitle: 'settings.clusterWidth'
           }
         },
         {
@@ -281,9 +255,7 @@ export const videoSchema: SettingsNode<Config> = {
           displayValue: true,
           page: {
             title: 'Cluster Video Height',
-            labelTitle: 'settings.clusterHeight',
-            description: 'Cluster screen height in px',
-            labelDescription: 'settings.clusterScreenHeightDescription'
+            labelTitle: 'settings.clusterHeight'
           }
         },
         {
@@ -297,9 +269,7 @@ export const videoSchema: SettingsNode<Config> = {
           displayValue: true,
           page: {
             title: 'Cluster Video FPS',
-            labelTitle: 'settings.clusterFps',
-            description: 'Cluster screen FPS',
-            labelDescription: 'settings.clusterScreenFpsDescription'
+            labelTitle: 'settings.clusterFps'
           }
         },
         {
@@ -313,9 +283,7 @@ export const videoSchema: SettingsNode<Config> = {
           displayValue: true,
           page: {
             title: 'Cluster Video DPI',
-            labelTitle: 'settings.clusterDpi',
-            description: 'Cluster screen DPI (0 = auto)',
-            labelDescription: 'settings.clusterScreenDpiDescription'
+            labelTitle: 'settings.clusterDpi'
           }
         },
         {
@@ -336,9 +304,7 @@ export const videoSchema: SettingsNode<Config> = {
               displayValue: true,
               page: {
                 title: 'Cluster Screen View Area Top',
-                labelTitle: 'settings.top',
-                description: 'Top inset in px',
-                labelDescription: 'settings.clusterViewAreaTopDescription'
+                labelTitle: 'settings.top'
               }
             },
             {
@@ -352,9 +318,7 @@ export const videoSchema: SettingsNode<Config> = {
               displayValue: true,
               page: {
                 title: 'Cluster Screen View Area Bottom',
-                labelTitle: 'settings.bottom',
-                description: 'Bottom inset in px',
-                labelDescription: 'settings.clusterViewAreaBottomDescription'
+                labelTitle: 'settings.bottom'
               }
             },
             {
@@ -368,9 +332,7 @@ export const videoSchema: SettingsNode<Config> = {
               displayValue: true,
               page: {
                 title: 'Cluster Screen View Area Left',
-                labelTitle: 'settings.left',
-                description: 'Left inset in px',
-                labelDescription: 'settings.clusterViewAreaLeftDescription'
+                labelTitle: 'settings.left'
               }
             },
             {
@@ -384,9 +346,7 @@ export const videoSchema: SettingsNode<Config> = {
               displayValue: true,
               page: {
                 title: 'Cluster Screen View Area Right',
-                labelTitle: 'settings.right',
-                description: 'Right inset in px',
-                labelDescription: 'settings.clusterViewAreaRightDescription'
+                labelTitle: 'settings.right'
               }
             }
           ]
@@ -409,9 +369,7 @@ export const videoSchema: SettingsNode<Config> = {
               displayValue: true,
               page: {
                 title: 'Cluster Screen Safe Area Top',
-                labelTitle: 'settings.top',
-                description: 'Top inset in px',
-                labelDescription: 'settings.clusterSafeAreaTopDescription'
+                labelTitle: 'settings.top'
               }
             },
             {
@@ -425,9 +383,7 @@ export const videoSchema: SettingsNode<Config> = {
               displayValue: true,
               page: {
                 title: 'Cluster Screen Safe Area Bottom',
-                labelTitle: 'settings.bottom',
-                description: 'Bottom inset in px',
-                labelDescription: 'settings.clusterSafeAreaBottomDescription'
+                labelTitle: 'settings.bottom'
               }
             },
             {
@@ -441,9 +397,7 @@ export const videoSchema: SettingsNode<Config> = {
               displayValue: true,
               page: {
                 title: 'Cluster Screen Safe Area Left',
-                labelTitle: 'settings.left',
-                description: 'Left inset in px',
-                labelDescription: 'settings.clusterSafeAreaLeftDescription'
+                labelTitle: 'settings.left'
               }
             },
             {
@@ -457,9 +411,7 @@ export const videoSchema: SettingsNode<Config> = {
               displayValue: true,
               page: {
                 title: 'Cluster Screen Safe Area Right',
-                labelTitle: 'settings.right',
-                description: 'Right inset in px',
-                labelDescription: 'settings.clusterSafeAreaRightDescription'
+                labelTitle: 'settings.right'
               }
             }
           ]

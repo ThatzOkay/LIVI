@@ -149,6 +149,7 @@ describe('FFTSpectrum', () => {
         lineTo: lineToMock,
         stroke: strokeMock,
         fillText: fillTextMock,
+        measureText: (t: string) => ({ width: t.length * 4 }),
         set fillStyle(_: string) {},
         set strokeStyle(_: string) {},
         set lineWidth(_: number) {},
@@ -304,9 +305,7 @@ describe('FFTSpectrum', () => {
       expect(strokeMock).toHaveBeenCalled()
       expect(fillTextMock).toHaveBeenCalledWith('20', expect.any(Number), expect.any(Number))
       expect(fillTextMock).toHaveBeenCalledWith('100', expect.any(Number), expect.any(Number))
-      expect(fillTextMock).toHaveBeenCalledWith('500', expect.any(Number), expect.any(Number))
       expect(fillTextMock).toHaveBeenCalledWith('1k', expect.any(Number), expect.any(Number))
-      expect(fillTextMock).toHaveBeenCalledWith('5k', expect.any(Number), expect.any(Number))
       expect(fillTextMock).toHaveBeenCalledWith('10k', expect.any(Number), expect.any(Number))
       expect(fillTextMock).toHaveBeenCalledWith('20k', expect.any(Number), expect.any(Number))
     })

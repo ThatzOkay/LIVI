@@ -26,8 +26,10 @@
 #include <wlr/interfaces/wlr_buffer.h>
 #include <wlr/backend/multi.h>
 #include <wlr/backend/wayland.h>
+#include <drm_fourcc.h>
 #include <wlr/render/allocator.h>
 #include <wlr/render/wlr_renderer.h>
+#include <wlr/types/wlr_buffer.h>
 #include <wlr/types/wlr_cursor.h>
 #include <wlr/types/wlr_compositor.h>
 #include <wlr/types/wlr_data_device.h>
@@ -44,7 +46,19 @@
 #include <wlr/types/wlr_xcursor_manager.h>
 #include <wlr/types/wlr_xdg_decoration_v1.h>
 #include <wlr/types/wlr_xdg_shell.h>
+#include <wlr/util/addon.h>
 #include <wlr/util/log.h>
+#include <wlr/render/gles2.h>
+#include <wlr/render/egl.h>
+#include <wlr/render/swapchain.h>
+#include <wlr/render/dmabuf.h>
+#include <wlr/render/drm_format_set.h>
+#include <wlr/render/wlr_renderer.h>
+#include <render/wlr_renderer.h>
+#include <GLES2/gl2.h>
+#include <GLES2/gl2ext.h>
+#include <EGL/egl.h>
+#include <EGL/eglext.h>
 #include <xkbcommon/xkbcommon.h>
 
 enum tinywl_cursor_mode {
@@ -56,8 +70,6 @@ enum tinywl_cursor_mode {
 // Each screen role gets its own non-overlapping x-slot in the scene
 #define LIVI_SCREEN_X_SLOT 100000
 
-// Compositor-drawn server-side decoration: a titlebar with the screen title and round minimize,
-// fullscreen and close buttons. Hidden in fullscreen/kiosk.
 #define LIVI_TITLEBAR_H 32
 #define LIVI_BTN_W 32
 #define LIVI_BTN_GAP 2
@@ -77,8 +89,8 @@ struct livi_video_cfg {
 
 struct tinywl_server {
 	struct wl_display *wl_display;
-	struct wlr_backend *backend;     // multi-backend from autocreate
-	struct wlr_backend *wl_backend;  // the nested wayland sub-backend (for new outputs)
+	struct wlr_backend *backend;
+	struct wlr_backend *wl_backend;
 	struct wlr_renderer *renderer;
 	struct wlr_allocator *allocator;
 	struct wlr_scene *scene;
@@ -88,7 +100,7 @@ struct tinywl_server {
 	struct wlr_scene_tree *layer_video;
 	struct wlr_scene_tree *layer_ui;
 	struct wlr_scene_tree *layer_deco;
-	struct wlr_scene_tree *layer_overlay;   // modal dialogs, above the UI
+	struct wlr_scene_tree *layer_overlay;
 
 	struct wlr_xdg_shell *xdg_shell;
 	struct wl_listener new_xdg_toplevel;
@@ -125,17 +137,22 @@ struct tinywl_server {
 	struct wl_list outputs;
 	struct wl_listener new_output;
 
-	// one screen per role (LIVI_SCREENS: main, dash, aux ...)
 	struct livi_screen *screens;
 	int n_screens;
 	struct livi_screen *pending_screen;   // next new output binds here (NULL -> main)
 	char pending_video_tags[LIVI_MAX_VIDEO_CFGS][64];
 	int n_pending_video_tags;
-	struct wl_list videos;        // video toplevels, found by tag
+	struct wl_list videos;
 	struct livi_video_cfg video_cfgs[LIVI_MAX_VIDEO_CFGS];
 	int ctrl_fd;
 
-	// inner UI child (the -s startup command)
+	// Display calibration state for the full-output shader pass. cal_active gates it.
+	bool cal_active;
+	float cal_gamma, cal_contrast, cal_gain[3];
+	GLuint cal_prog;
+	GLint cal_loc_gamma, cal_loc_contrast, cal_loc_gain, cal_loc_tex;
+	bool cal_prog_failed;
+
 	char *startup_cmd;
 	const char *ui_socket;   // WAYLAND_DISPLAY the inner UI connects to (set per-child only)
 	pid_t startup_pid;
@@ -152,6 +169,9 @@ struct tinywl_output {
 	struct wl_listener frame;
 	struct wl_listener request_state;
 	struct wl_listener destroy;
+	// full-output calibration pass: scene composites into cal_inter, gamma shader into cal_final.
+	struct wlr_swapchain *cal_inter, *cal_final;
+	int cal_ow, cal_oh;
 };
 
 struct tinywl_toplevel {
@@ -163,7 +183,7 @@ struct tinywl_toplevel {
 	struct wlr_xdg_toplevel_decoration_v1 *decoration;  // forced server-side on initial commit
 	bool is_video;
 	bool is_dialog;   // modal dialog: lives in layer_overlay, kept centered
-	// video plane: tag (claim) + AA crop region, placed by apply_video_layout
+	// video plane: tag (claim) + crop region, placed by apply_video_layout
 	char tag[64];
 	bool has_crop;
 	double crop_l, crop_t, vis_w, vis_h, tier_w, tier_h;
@@ -202,23 +222,21 @@ struct livi_screen {
 	int32_t width, height;
 	int32_t req_width, req_height;   // host-requested output size (0 -> LIVI_OUTPUT_SIZE)
 
-	struct tinywl_toplevel *ui;      // UI plane (Electron), on top
+	struct tinywl_toplevel *ui;
 
 	struct wlr_scene_rect *backdrop;
 	float backdrop_color[4];
 	bool has_backdrop_color;
 
-	// compositor-drawn titlebar (cairo), above the UI, hidden while fullscreen
-	struct wlr_scene_buffer *titlebar;   // dark rounded-top bar, re-drawn on width change
-	struct wlr_scene_buffer *title;      // screen title text
+	struct wlr_scene_buffer *titlebar;
+	struct wlr_scene_buffer *title;
 	struct wlr_scene_buffer *btn_min;
 	struct wlr_scene_buffer *btn_fs;
 	struct wlr_scene_buffer *btn_close;
-	int titlebar_w;                      // last width the bar was drawn at
-	bool fullscreen;                 // host output is fullscreen -> no titlebar, UI fills
+	int titlebar_w;
+	bool fullscreen;
 };
 
-// Top inset the UI/video planes leave for the titlebar (0 while fullscreen).
 static int screen_top_inset(const struct livi_screen *s) {
 	return s->fullscreen ? 0 : LIVI_TITLEBAR_H;
 }
@@ -232,7 +250,6 @@ static struct livi_screen *screen_by_role(struct tinywl_server *server, const ch
 	return NULL;
 }
 
-// Map a touch/pointer device's output name (each nested output has its own) to its screen.
 static struct livi_screen *screen_for_output_name(struct tinywl_server *server,
 		const char *name) {
 	if (name == NULL) {
@@ -284,7 +301,6 @@ static struct livi_video_cfg *cfg_for_tag(struct tinywl_server *server, const ch
 	return NULL;
 }
 
-// Apply a cached cfg (screen + crop + visibility) to a video toplevel.
 static void apply_cfg_to_video(struct tinywl_server *server, struct livi_video_cfg *cfg,
 		struct tinywl_toplevel *v) {
 	if (cfg->screen[0]) {
@@ -625,12 +641,11 @@ static enum livi_deco_hit deco_hit_test(struct tinywl_server *server, double lx,
 			return LIVI_DECO_MOVE;
 		}
 		if (edges != 0) { *out = s; *out_edges = edges; return LIVI_DECO_RESIZE; }
-		return LIVI_DECO_NONE;   // inside the UI surface
+		return LIVI_DECO_NONE;
 	}
 	return LIVI_DECO_NONE;
 }
 
-// xcursor name for a resize-edge bitmask (only bottom/left/right + bottom corners are used).
 static const char *resize_cursor_name(uint32_t edges) {
 	bool b = (edges & WLR_EDGE_BOTTOM) != 0;
 	bool l = (edges & WLR_EDGE_LEFT) != 0;
@@ -652,7 +667,6 @@ static void process_cursor_motion(struct tinywl_server *server, uint32_t time) {
 		return;
 	}
 
-	// Decoration hover feedback: resize cursors over the borders, default over the titlebar.
 	struct livi_screen *ds = NULL;
 	uint32_t dedges = 0;
 	enum livi_deco_hit dh = deco_hit_test(server, server->cursor->x, server->cursor->y,
@@ -818,21 +832,24 @@ static void server_touch_frame(struct wl_listener *listener, void *data) {
 	wlr_seat_touch_notify_frame(server->seat);
 }
 
+static bool cal_full_output(struct tinywl_output *output);
+
 static void output_frame(struct wl_listener *listener, void *data) {
 	struct tinywl_output *output = wl_container_of(listener, output, frame);
-	struct wlr_scene *scene = output->server->scene;
-
+	struct tinywl_server *server = output->server;
 	struct wlr_scene_output *scene_output = wlr_scene_get_scene_output(
-		scene, output->wlr_output);
+		server->scene, output->wlr_output);
 
-	wlr_scene_output_commit(scene_output, NULL);
+	if (!server->cal_active || !cal_full_output(output)) {
+		wlr_scene_output_commit(scene_output, NULL);
+	}
 
 	struct timespec now;
 	clock_gettime(CLOCK_MONOTONIC, &now);
 	wlr_scene_output_send_frame_done(scene_output, &now);
 }
 
-// Size+position a video plane so its AA content region fills the screen, margins
+// Size+position a video plane so its content region fills the screen, margins
 // overflowing off the output edge (the scene clips them). Zero-copy.
 static void apply_video_layout(struct tinywl_toplevel *video) {
 	struct livi_screen *s = video->screen;
@@ -840,7 +857,7 @@ static void apply_video_layout(struct tinywl_toplevel *video) {
 		return;
 	}
 	int top = screen_top_inset(s);
-	int ow = s->width, oh = s->height - top;   // area below the titlebar
+	int ow = s->width, oh = s->height - top;
 	if (ow <= 0 || oh <= 0) {
 		return;
 	}
@@ -862,6 +879,279 @@ static void apply_video_layout(struct tinywl_toplevel *video) {
 	int py = (int)lround(top + off_y - video->crop_t * scale);
 	wlr_xdg_toplevel_set_size(video->xdg_toplevel, tw, th);
 	wlr_scene_node_set_position(&video->scene_tree->node, px, py);
+}
+
+static const char CAL_VERT_SRC[] =
+	"attribute vec2 pos;\n"
+	"varying vec2 v_uv;\n"
+	"void main() {\n"
+	"  v_uv = vec2(pos.x * 0.5 + 0.5, pos.y * 0.5 + 0.5);\n"
+	"  gl_Position = vec4(pos, 0.0, 1.0);\n"
+	"}\n";
+
+static const char CAL_FRAG_SRC[] =
+	"precision highp float;\n"
+	"varying vec2 v_uv;\n"
+	"uniform sampler2D tex;\n"
+	"uniform float u_gamma;\n"
+	"uniform float u_contrast;\n"
+	"uniform vec3 u_gain;\n"
+	"void main() {\n"
+	"  vec3 c = texture2D(tex, v_uv).rgb;\n"
+	"  c = pow(c, vec3(1.0 / u_gamma));\n"
+	"  c = (c - 0.5) * u_contrast + 0.5;\n"
+	"  c = clamp(c * u_gain, 0.0, 1.0);\n"
+	"  gl_FragColor = vec4(c, 1.0);\n"
+	"}\n";
+
+static GLuint cal_compile(GLenum type, const char *src) {
+	GLuint sh = glCreateShader(type);
+	glShaderSource(sh, 1, &src, NULL);
+	glCompileShader(sh);
+	GLint ok = GL_FALSE;
+	glGetShaderiv(sh, GL_COMPILE_STATUS, &ok);
+	if (!ok) {
+		char log[512];
+		glGetShaderInfoLog(sh, sizeof(log), NULL, log);
+		wlr_log(WLR_ERROR, "livi cal: shader compile failed: %s", log);
+		glDeleteShader(sh);
+		return 0;
+	}
+	return sh;
+}
+
+// Compile the calibration program. EGL context must be current.
+static bool cal_ensure_program(struct tinywl_server *server) {
+	if (server->cal_prog) return true;
+	if (server->cal_prog_failed) return false;
+	GLuint vs = cal_compile(GL_VERTEX_SHADER, CAL_VERT_SRC);
+	GLuint fs = cal_compile(GL_FRAGMENT_SHADER, CAL_FRAG_SRC);
+	if (!vs || !fs) {
+		if (vs) glDeleteShader(vs);
+		if (fs) glDeleteShader(fs);
+		server->cal_prog_failed = true;
+		return false;
+	}
+	GLuint prog = glCreateProgram();
+	glAttachShader(prog, vs);
+	glAttachShader(prog, fs);
+	glBindAttribLocation(prog, 0, "pos");
+	glLinkProgram(prog);
+	glDeleteShader(vs);
+	glDeleteShader(fs);
+	GLint ok = GL_FALSE;
+	glGetProgramiv(prog, GL_LINK_STATUS, &ok);
+	if (!ok) {
+		char log[512];
+		glGetProgramInfoLog(prog, sizeof(log), NULL, log);
+		wlr_log(WLR_ERROR, "livi cal: program link failed: %s", log);
+		glDeleteProgram(prog);
+		server->cal_prog_failed = true;
+		return false;
+	}
+	server->cal_prog = prog;
+	server->cal_loc_gamma = glGetUniformLocation(prog, "u_gamma");
+	server->cal_loc_contrast = glGetUniformLocation(prog, "u_contrast");
+	server->cal_loc_gain = glGetUniformLocation(prog, "u_gain");
+	server->cal_loc_tex = glGetUniformLocation(prog, "tex");
+	return true;
+}
+
+static PFNEGLCREATEIMAGEKHRPROC p_eglCreateImageKHR;
+static PFNEGLDESTROYIMAGEKHRPROC p_eglDestroyImageKHR;
+static PFNGLEGLIMAGETARGETTEXTURE2DOESPROC p_glEGLImageTargetTexture2DOES;
+
+static bool cal_load_egl_ext(void) {
+	if (p_eglCreateImageKHR) {
+		return true;
+	}
+	p_eglCreateImageKHR = (PFNEGLCREATEIMAGEKHRPROC)eglGetProcAddress("eglCreateImageKHR");
+	p_eglDestroyImageKHR = (PFNEGLDESTROYIMAGEKHRPROC)eglGetProcAddress("eglDestroyImageKHR");
+	p_glEGLImageTargetTexture2DOES =
+		(PFNGLEGLIMAGETARGETTEXTURE2DOESPROC)eglGetProcAddress("glEGLImageTargetTexture2DOES");
+	return p_eglCreateImageKHR && p_eglDestroyImageKHR && p_glEGLImageTargetTexture2DOES;
+}
+
+// EGLImage + GL texture + FBO for one swapchain buffer, cached on it via a wlr_addon.
+struct cal_target {
+	struct wlr_addon addon;
+	struct tinywl_server *server;
+	EGLImageKHR image;
+	GLuint tex;
+	GLuint fbo;
+};
+
+static void cal_target_destroy(struct wlr_addon *addon) {
+	struct cal_target *t = wl_container_of(addon, t, addon);
+	struct wlr_egl *egl = wlr_gles2_renderer_get_egl(t->server->renderer);
+	EGLDisplay dpy = wlr_egl_get_display(egl);
+	eglMakeCurrent(dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, wlr_egl_get_context(egl));
+	glDeleteFramebuffers(1, &t->fbo);
+	glDeleteTextures(1, &t->tex);
+	p_eglDestroyImageKHR(dpy, t->image);
+	wlr_addon_finish(&t->addon);
+	free(t);
+}
+
+static const struct wlr_addon_interface cal_target_impl = {
+	.name = "livi_cal_target",
+	.destroy = cal_target_destroy,
+};
+
+// Get or build the FBO that renders into `buf`. EGL context must be current.
+static struct cal_target *cal_target_get(struct tinywl_server *server, struct wlr_buffer *buf) {
+	struct wlr_addon *existing = wlr_addon_find(&buf->addons, server, &cal_target_impl);
+	if (existing) {
+		struct cal_target *t = wl_container_of(existing, t, addon);
+		return t;
+	}
+	if (!cal_load_egl_ext()) {
+		return NULL;
+	}
+	struct wlr_dmabuf_attributes attribs;
+	if (!wlr_buffer_get_dmabuf(buf, &attribs)) {
+		return NULL;
+	}
+	EGLDisplay dpy = wlr_egl_get_display(wlr_gles2_renderer_get_egl(server->renderer));
+	EGLint a[50];
+	int i = 0;
+	a[i++] = EGL_WIDTH; a[i++] = attribs.width;
+	a[i++] = EGL_HEIGHT; a[i++] = attribs.height;
+	a[i++] = EGL_LINUX_DRM_FOURCC_EXT; a[i++] = (EGLint)attribs.format;
+	a[i++] = EGL_DMA_BUF_PLANE0_FD_EXT; a[i++] = attribs.fd[0];
+	a[i++] = EGL_DMA_BUF_PLANE0_OFFSET_EXT; a[i++] = (EGLint)attribs.offset[0];
+	a[i++] = EGL_DMA_BUF_PLANE0_PITCH_EXT; a[i++] = (EGLint)attribs.stride[0];
+	if (attribs.modifier != DRM_FORMAT_MOD_INVALID) {
+		a[i++] = EGL_DMA_BUF_PLANE0_MODIFIER_LO_EXT;
+		a[i++] = (EGLint)(attribs.modifier & 0xFFFFFFFF);
+		a[i++] = EGL_DMA_BUF_PLANE0_MODIFIER_HI_EXT;
+		a[i++] = (EGLint)(attribs.modifier >> 32);
+	}
+	a[i++] = EGL_NONE;
+	EGLImageKHR img = p_eglCreateImageKHR(dpy, EGL_NO_CONTEXT, EGL_LINUX_DMA_BUF_EXT, NULL, a);
+	if (img == EGL_NO_IMAGE_KHR) {
+		wlr_log(WLR_ERROR, "livi cal: eglCreateImageKHR for target failed");
+		return NULL;
+	}
+	GLuint tex;
+	glGenTextures(1, &tex);
+	glBindTexture(GL_TEXTURE_2D, tex);
+	p_glEGLImageTargetTexture2DOES(GL_TEXTURE_2D, img);
+	GLuint fbo;
+	glGenFramebuffers(1, &fbo);
+	glBindFramebuffer(GL_FRAMEBUFFER, fbo);
+	glFramebufferTexture2D(GL_FRAMEBUFFER, GL_COLOR_ATTACHMENT0, GL_TEXTURE_2D, tex, 0);
+	GLenum st = glCheckFramebufferStatus(GL_FRAMEBUFFER);
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	glBindTexture(GL_TEXTURE_2D, 0);
+	if (st != GL_FRAMEBUFFER_COMPLETE) {
+		wlr_log(WLR_ERROR, "livi cal: target FBO incomplete (0x%x)", st);
+		glDeleteFramebuffers(1, &fbo);
+		glDeleteTextures(1, &tex);
+		p_eglDestroyImageKHR(dpy, img);
+		return NULL;
+	}
+	struct cal_target *t = calloc(1, sizeof(*t));
+	t->server = server;
+	t->image = img;
+	t->tex = tex;
+	t->fbo = fbo;
+	wlr_addon_init(&t->addon, &buf->addons, server, &cal_target_impl);
+	return t;
+}
+
+// Composite the whole scene into an intermediate buffer, run the gamma shader over it, commit
+// the result. Covers UI + video uniformly, GPU->GPU, no readback. Returns false on any setup
+// failure so the caller falls back to a normal commit and never blacks out.
+static bool cal_full_output(struct tinywl_output *output) {
+	struct tinywl_server *server = output->server;
+	struct wlr_scene_output *scene_output =
+		wlr_scene_get_scene_output(server->scene, output->wlr_output);
+	if (scene_output == NULL) {
+		return false;
+	}
+	int ow = output->wlr_output->width, oh = output->wlr_output->height;
+	if (ow <= 0 || oh <= 0) {
+		return false;
+	}
+	struct wlr_egl *egl = wlr_gles2_renderer_get_egl(server->renderer);
+	EGLDisplay dpy = wlr_egl_get_display(egl);
+	eglMakeCurrent(dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, wlr_egl_get_context(egl));
+	if (!cal_ensure_program(server)) {
+		return false;
+	}
+	const struct wlr_drm_format_set *fmts = wlr_renderer_get_render_formats(server->renderer);
+	const struct wlr_drm_format *fmt =
+		fmts ? wlr_drm_format_set_get(fmts, DRM_FORMAT_XRGB8888) : NULL;
+	if (fmt == NULL) {
+		return false;
+	}
+	if (!output->cal_inter || output->cal_ow != ow || output->cal_oh != oh) {
+		if (output->cal_inter) wlr_swapchain_destroy(output->cal_inter);
+		if (output->cal_final) wlr_swapchain_destroy(output->cal_final);
+		output->cal_inter = wlr_swapchain_create(server->allocator, ow, oh, fmt);
+		output->cal_final = wlr_swapchain_create(server->allocator, ow, oh, fmt);
+		output->cal_ow = ow;
+		output->cal_oh = oh;
+	}
+	if (!output->cal_inter || !output->cal_final) {
+		return false;
+	}
+
+	struct wlr_output_state state;
+	wlr_output_state_init(&state);
+	struct wlr_scene_output_state_options opts = { .swapchain = output->cal_inter };
+	if (!wlr_scene_output_build_state(scene_output, &state, &opts)
+			|| !(state.committed & WLR_OUTPUT_STATE_BUFFER) || state.buffer == NULL) {
+		wlr_output_state_finish(&state);
+		return false;
+	}
+
+	struct wlr_buffer *dst = wlr_swapchain_acquire(output->cal_final);
+	struct cal_target *t = dst ? cal_target_get(server, dst) : NULL;
+	struct wlr_texture *src = wlr_texture_from_buffer(server->renderer, state.buffer);
+	if (!t || !src) {
+		if (src) wlr_texture_destroy(src);
+		if (dst) wlr_buffer_unlock(dst);
+		wlr_output_state_finish(&state);
+		return false;
+	}
+	struct wlr_gles2_texture_attribs sa;
+	wlr_gles2_texture_get_attribs(src, &sa);
+
+	eglMakeCurrent(dpy, EGL_NO_SURFACE, EGL_NO_SURFACE, wlr_egl_get_context(egl));
+	glBindFramebuffer(GL_FRAMEBUFFER, t->fbo);
+	glViewport(0, 0, ow, oh);
+	glDisable(GL_BLEND);
+	glUseProgram(server->cal_prog);
+	glUniform1f(server->cal_loc_gamma, server->cal_gamma);
+	glUniform1f(server->cal_loc_contrast, server->cal_contrast);
+	glUniform3f(server->cal_loc_gain, server->cal_gain[0], server->cal_gain[1], server->cal_gain[2]);
+	glActiveTexture(GL_TEXTURE0);
+	glBindTexture(sa.target, sa.tex);
+	glTexParameteri(sa.target, GL_TEXTURE_MIN_FILTER, GL_LINEAR);
+	glTexParameteri(sa.target, GL_TEXTURE_MAG_FILTER, GL_LINEAR);
+	glUniform1i(server->cal_loc_tex, 0);
+	static const GLfloat quad[] = { -1, -1, 1, -1, -1, 1, 1, 1 };
+	glEnableVertexAttribArray(0);
+	glVertexAttribPointer(0, 2, GL_FLOAT, GL_FALSE, 0, quad);
+	glDrawArrays(GL_TRIANGLE_STRIP, 0, 4);
+	glDisableVertexAttribArray(0);
+	glBindTexture(sa.target, 0);
+	glUseProgram(0);
+	glBindFramebuffer(GL_FRAMEBUFFER, 0);
+	glFlush();
+	wlr_texture_destroy(src);
+
+	wlr_output_state_set_buffer(&state, dst);
+	wlr_buffer_unlock(dst);
+	pixman_region32_t damage;
+	pixman_region32_init_rect(&damage, 0, 0, ow, oh);
+	wlr_output_state_set_damage(&state, &damage);
+	pixman_region32_fini(&damage);
+	bool ok = wlr_output_commit_state(output->wlr_output, &state);
+	wlr_output_state_finish(&state);
+	return ok;
 }
 
 // Wrap a cairo ARGB32 image surface as a wlr_buffer so it can live in the scene graph.
@@ -896,7 +1186,6 @@ static const struct wlr_buffer_impl livi_deco_buffer_impl = {
 	.end_data_ptr_access = livi_deco_buffer_end_data_ptr_access,
 };
 
-// Take ownership of a drawn cairo surface and hand it to a scene buffer.
 static void livi_scene_set_cairo(struct wlr_scene_buffer *sb, cairo_surface_t *surface) {
 	struct livi_deco_buffer *b = calloc(1, sizeof(*b));
 	if (b == NULL) {
@@ -912,13 +1201,11 @@ static void livi_scene_set_cairo(struct wlr_scene_buffer *sb, cairo_surface_t *s
 
 enum livi_btn_sym { LIVI_SYM_MIN, LIVI_SYM_FS, LIVI_SYM_CLOSE };
 
-// A round, monochrome window-control button (subtle light disc + a light glyph), like the
-// typical GNOME controls. The slot is w x h, the disc is centred.
 static cairo_surface_t *livi_draw_button(enum livi_btn_sym sym, int w, int h) {
 	cairo_surface_t *s = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w, h);
 	cairo_t *cr = cairo_create(s);
 	double cx = w / 2.0, cy = h / 2.0;
-	double rad = h * 0.34;   // disc radius, independent of the slot width
+	double rad = h * 0.34;
 	cairo_arc(cr, cx, cy, rad, 0, 2 * M_PI);
 	cairo_set_source_rgba(cr, 1, 1, 1, 0.10);
 	cairo_fill(cr);
@@ -927,7 +1214,7 @@ static cairo_surface_t *livi_draw_button(enum livi_btn_sym sym, int w, int h) {
 	cairo_set_line_width(cr, 1.5);
 	cairo_set_line_cap(cr, CAIRO_LINE_CAP_ROUND);
 	cairo_set_line_join(cr, CAIRO_LINE_JOIN_ROUND);
-	double g = rad * 0.33;   // glyph half-extent, leaves clear padding to the disc edge
+	double g = rad * 0.33;
 	switch (sym) {
 	case LIVI_SYM_CLOSE:
 		cairo_move_to(cr, cx - g, cy - g); cairo_line_to(cr, cx + g, cy + g);
@@ -939,11 +1226,9 @@ static cairo_surface_t *livi_draw_button(enum livi_btn_sym sym, int w, int h) {
 		cairo_stroke(cr);
 		break;
 	case LIVI_SYM_FS: {
-		double e = g * 0.8;   // corner-bracket leg length
-		// bracket in the top-left corner
+		double e = g * 0.8;
 		cairo_move_to(cr, cx - g + e, cy - g); cairo_line_to(cr, cx - g, cy - g);
 		cairo_line_to(cr, cx - g, cy - g + e);
-		// bracket in the bottom-right corner
 		cairo_move_to(cr, cx + g - e, cy + g); cairo_line_to(cr, cx + g, cy + g);
 		cairo_line_to(cr, cx + g, cy + g - e);
 		cairo_stroke(cr);
@@ -955,7 +1240,6 @@ static cairo_surface_t *livi_draw_button(enum livi_btn_sym sym, int w, int h) {
 	return s;
 }
 
-// The screen's title text, light on transparent, vertically centred in a h-tall strip.
 static cairo_surface_t *livi_draw_title(const char *text, int h) {
 	cairo_surface_t *probe = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, 1, 1);
 	cairo_t *pc = cairo_create(probe);
@@ -981,7 +1265,6 @@ static cairo_surface_t *livi_draw_title(const char *text, int h) {
 	return s;
 }
 
-// The titlebar background: a flat dark bar
 static cairo_surface_t *livi_draw_titlebar(int w, int h) {
 	cairo_surface_t *s = cairo_image_surface_create(CAIRO_FORMAT_ARGB32, w, h);
 	cairo_t *cr = cairo_create(s);
@@ -992,8 +1275,6 @@ static cairo_surface_t *livi_draw_titlebar(int w, int h) {
 	return s;
 }
 
-// Lay out a screen's UI plane and its titlebar. Windowed: titlebar on top, UI pushed down by
-// its height. Fullscreen/kiosk: titlebar hidden, UI fills the whole output.
 static void apply_ui_layout(struct livi_screen *s) {
 	if (s == NULL) {
 		return;
@@ -1040,8 +1321,6 @@ static void apply_ui_layout(struct livi_screen *s) {
 	}
 }
 
-// Toggle the host output between windowed (with titlebar) and fullscreen. Reflected onto the
-// inner Electron toplevel so its kiosk/UI state follows.
 static void livi_toggle_fullscreen(struct livi_screen *s) {
 	if (s == NULL || s->ui == NULL) {
 		return;
@@ -1066,7 +1345,6 @@ static void output_request_state(struct wl_listener *listener, void *data) {
 	if (s == NULL) {
 		return;
 	}
-	/* LIVI: track the screen size and reflow its UI + every video plane on it + backdrop */
 	s->width = output->wlr_output->width;
 	s->height = output->wlr_output->height;
 	struct tinywl_toplevel *v;
@@ -1084,6 +1362,9 @@ static void output_request_state(struct wl_listener *listener, void *data) {
 static void output_destroy(struct wl_listener *listener, void *data) {
 	struct tinywl_output *output = wl_container_of(listener, output, destroy);
 	struct livi_screen *s = output->screen;
+
+	if (output->cal_inter) wlr_swapchain_destroy(output->cal_inter);
+	if (output->cal_final) wlr_swapchain_destroy(output->cal_final);
 
 	if (s != NULL) {
 		s->wlr_output = NULL;
@@ -1120,7 +1401,6 @@ static void output_destroy(struct wl_listener *listener, void *data) {
 	free(output);
 }
 
-// Branded display title per role (role stays the lowercase identifier).
 static const char *role_title(const char *role) {
 	if (strcmp(role, "main") == 0) return "LIVI";
 	if (strcmp(role, "dash") == 0) return "Dash";
@@ -1202,7 +1482,6 @@ static void server_new_output(struct wl_listener *listener, void *data) {
 	struct wlr_scene_output *scene_output = wlr_scene_output_create(server->scene, wlr_output);
 	wlr_scene_output_layout_add_output(server->scene_layout, l_output, scene_output);
 
-	/* per-screen opaque backdrop at the screen's x-offset, lowered to the very bottom */
 	float black[4] = {0.0f, 0.0f, 0.0f, 1.0f};
 	float magenta[4] = {0.55f, 0.0f, 0.55f, 1.0f};
 	const float *color = getenv("LIVI_DEBUG_BG") ? magenta
@@ -1254,7 +1533,6 @@ static void xdg_toplevel_map(struct wl_listener *listener, void *data) {
 		return;
 	}
 
-	/* UI plane: pin it under its screen's titlebar, size it to fit, then focus it */
 	apply_ui_layout(s);
 	focus_toplevel(toplevel);
 }
@@ -1292,7 +1570,7 @@ static void xdg_toplevel_commit(struct wl_listener *listener, void *data) {
 				s = screen_by_role(server, title + 5);
 			}
 			if (s == NULL) {
-				s = &server->screens[0];   // untitled UI (main) -> main
+				s = &server->screens[0];
 			}
 			toplevel->is_video = false;
 			const char *ui_app = getenv("LIVI_OUTPUT_APP_ID");
@@ -1322,7 +1600,6 @@ static void xdg_toplevel_commit(struct wl_listener *listener, void *data) {
 			wl_list_insert(&server->videos, &toplevel->video_link);
 		}
 		toplevel->screen = s;
-		// fixed z-order: overlay dialogs on top, then UI, then video, then backdrop
 		struct wlr_scene_tree *layer = toplevel->is_dialog ? server->layer_overlay
 			: toplevel->is_video ? server->layer_video : server->layer_ui;
 		wlr_scene_node_reparent(&toplevel->scene_tree->node, layer);
@@ -1330,7 +1607,6 @@ static void xdg_toplevel_commit(struct wl_listener *listener, void *data) {
 			app_id ? app_id : "(null)", title ? title : "(null)", toplevel->tag,
 			toplevel->is_dialog ? "dialog" : toplevel->is_video ? "video" : "ui", s->role);
 
-		/* lay the new plane out: UI gets a titlebar, video fills the area below it */
 		if (toplevel->is_video) {
 			apply_video_layout(toplevel);
 		} else {
@@ -1348,7 +1624,6 @@ static void xdg_toplevel_commit(struct wl_listener *listener, void *data) {
 
 	if (toplevel->is_dialog && toplevel->screen != NULL
 			&& !toplevel->xdg_toplevel->base->initial_commit) {
-		// keep the modal dialog centered on its screen
 		int w = toplevel->xdg_toplevel->base->geometry.width;
 		int h = toplevel->xdg_toplevel->base->geometry.height;
 		if (w <= 0 || h <= 0) {
@@ -1437,7 +1712,6 @@ static void xdg_toplevel_request_fullscreen(
 		if (s->ui == toplevel && s->wlr_output != NULL &&
 				wlr_output_is_wl(s->wlr_output)) {
 			wlr_wl_output_set_fullscreen(s->wlr_output, want);
-			// Track the mode so the titlebar shows/hides, then re-lay the UI for it.
 			s->fullscreen = want;
 			apply_ui_layout(s);
 			wlr_log(WLR_INFO, "livi: request_fullscreen=%d screen '%s' output %dx%d",
@@ -1539,7 +1813,6 @@ static void server_new_xdg_popup(struct wl_listener *listener, void *data) {
 	wl_signal_add(&xdg_popup->events.destroy, &popup->destroy);
 }
 
-// (Re)spawn the inner UI child (the -s startup command). Used at boot and on "restart".
 static void spawn_startup(struct tinywl_server *server) {
 	if (server->startup_cmd == NULL) {
 		return;
@@ -1582,10 +1855,7 @@ static void ctrl_handle_line(struct tinywl_server *server, const char *line) {
 	double cl, ct, vw, vh, tw, th;
 	int onoff, swidth, sheight;
 
-	// restart the inner UI: kill the current child and re-spawn it. The compositor (and
-	// thus the host output windows) stays up, only the Electron app relaunches.
 	if (strcmp(line, "restart") == 0) {
-		// Full restart
 		wlr_log(WLR_INFO, "livi: restart requested -> waiting for inner UI to quit, then re-exec");
 		server->full_restart = true;
 		if (server->startup_pid > 0) {
@@ -1675,6 +1945,18 @@ static void ctrl_handle_line(struct tinywl_server *server, const char *line) {
 				wlr_scene_rect_set_color(s->backdrop, s->backdrop_color);
 			}
 		}
+		return;
+	}
+	double ga, co, cr, cg, cb;
+	if (sscanf(line, "gamma %lf %lf %lf %lf %lf", &ga, &co, &cr, &cg, &cb) == 5) {
+		server->cal_gamma = (float)ga;
+		server->cal_contrast = (float)co;
+		server->cal_gain[0] = (float)cr;
+		server->cal_gain[1] = (float)cg;
+		server->cal_gain[2] = (float)cb;
+		server->cal_active =
+			ga != 1.0 || co != 1.0 || cr != 1.0 || cg != 1.0 || cb != 1.0;
+		return;
 	}
 }
 
@@ -1787,7 +2069,6 @@ int main(int argc, char *argv[]) {
 
 	struct tinywl_server server = {0};
 
-	/* LIVI: known screen roles from LIVI_SCREENS, outputs are opened on demand per role */
 	char screens_buf[256];
 	const char *screens_env = getenv("LIVI_SCREENS");
 	snprintf(screens_buf, sizeof(screens_buf), "%s",
@@ -1840,6 +2121,9 @@ int main(int argc, char *argv[]) {
 	server.new_output.notify = server_new_output;
 	wl_signal_add(&server.backend->events.new_output, &server.new_output);
 
+	// Force the scene to composite every layer into our intermediate buffer so the full-output
+	// calibration pass can sample the whole frame.
+	setenv("WLR_SCENE_DISABLE_DIRECT_SCANOUT", "1", 1);
 	server.scene = wlr_scene_create();
 	server.scene_layout = wlr_scene_attach_output_layout(server.scene, server.output_layout);
 	// created in z-order: backdrop (bottom), video planes, UI, decoration, overlay (top)
@@ -1939,7 +2223,6 @@ int main(int argc, char *argv[]) {
 		wlr_log(WLR_ERROR, "livi: re-exec failed: %s", strerror(errno));
 	}
 
-	/* LIVI: take the spawned UI down with us */
 	if (server.startup_pid > 0) {
 		kill(server.startup_pid, SIGTERM);
 	}

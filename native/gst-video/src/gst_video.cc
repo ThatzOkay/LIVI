@@ -21,8 +21,6 @@
 #include <unistd.h>
 #endif
 
-// Native window attach: mac in gst_video_mac.mm, Windows in gst_video_win.cc. Linux runs
-// under livi-compositor (waylandsink is its own client), so it uses no-op stubs.
 #if defined(__APPLE__) || defined(_WIN32)
 extern "C" guintptr livi_attach_view(guintptr parent, void** outView);
 extern "C" void livi_remove_view(void* view);
@@ -46,6 +44,7 @@ struct Player {
   GstElement* pipeline = nullptr;
   GstElement* appsrc = nullptr;
   GstElement* sink = nullptr;
+  GstElement* glshader = nullptr;
   void* view = nullptr;
 };
 
@@ -53,7 +52,6 @@ static void ensure_init() {
   static bool done = false;
   if (!done) {
     gst_init(NULL, NULL);
-    // Opt-in verbose decode/sink tracing
     if (const char* dbg = getenv("LIVI_GST_DEBUG")) {
       gst_debug_set_threshold_from_string(
         (dbg[0] == '1' && dbg[1] == '\0')
@@ -113,21 +111,7 @@ static void force_sinks_realtime(GstElement* pipeline) {
   gst_iterator_free(it);
 }
 
-// Log the decoded video caps once (format + memory) to diagnose the path
-static GstPadProbeReturn caps_probe(GstPad*, GstPadProbeInfo* info, gpointer) {
-  GstEvent* ev = GST_PAD_PROBE_INFO_EVENT(info);
-  if (ev && GST_EVENT_TYPE(ev) == GST_EVENT_CAPS) {
-    GstCaps* caps = nullptr;
-    gst_event_parse_caps(ev, &caps);
-    gchar* s = gst_caps_to_string(caps);
-    fprintf(stderr, "[gst_video] decoded caps: %s\n", s ? s : "?");
-    g_free(s);
-    return GST_PAD_PROBE_REMOVE;
-  }
-  return GST_PAD_PROBE_OK;
-}
-
-// Colorimetry the dongle welcome screen uses that the Pi 4 stateful v4l2 decoder rejects.
+// Rewrite a colorimetry the Pi 4 stateful v4l2 decoder rejects to one it accepts.
 static const char* kBadColorimetry = "1:4:5:1";
 static const char* kGoodColorimetry = "1:4:7:1";
 
@@ -136,9 +120,6 @@ static const char* caps_colorimetry(GstCaps* caps) {
   return gst_structure_get_string(gst_caps_get_structure(caps, 0), "colorimetry");
 }
 
-// h264parse's getcaps/accept-caps query for kBadColorimetry returns EMPTY from the decoder, so
-// it never pushes caps. Answer it as acceptable so negotiation proceeds; the event probe then
-// rewrites the value the decoder actually sees.
 static GstPadProbeReturn colorimetry_query_probe(GstPad* pad, GstPadProbeInfo* info, gpointer) {
   GstQuery* q = GST_PAD_PROBE_INFO_QUERY(info);
   if (!q) return GST_PAD_PROBE_OK;
@@ -183,41 +164,6 @@ static GstPadProbeReturn colorimetry_fixup_probe(GstPad*, GstPadProbeInfo* info,
   return GST_PAD_PROBE_OK;
 }
 
-// Add GstVideoMeta to the decoder's ALLOCATION query. The Pi v4l2codecs decoder only
-// zero-copies a cropped frame (1080p coded at 1088) when downstream advertises VideoMeta,
-// which waylandsink does not. Never add a buffer pool here, it can't describe DMA_DRM and
-// crashes the decoder. 720p needs no crop and zero-copies regardless.
-static GstPadProbeReturn alloc_meta_probe(GstPad*, GstPadProbeInfo* info, gpointer) {
-  GstQuery* query = GST_PAD_PROBE_INFO_QUERY(info);
-  if (query && GST_QUERY_TYPE(query) == GST_QUERY_ALLOCATION) {
-    gboolean had = gst_query_find_allocation_meta(query, GST_VIDEO_META_API_TYPE, NULL);
-    if (!had) gst_query_add_allocation_meta(query, GST_VIDEO_META_API_TYPE, NULL);
-    fprintf(stderr, "[gst_video] ALLOC query: had_videometa=%d added=%d\n", had, !had);
-  }
-  return GST_PAD_PROBE_OK;
-}
-
-// DIAGNOSTIC (temporary)
-static GstPadProbeReturn buffer_probe(GstPad*, GstPadProbeInfo* info, gpointer) {
-  GstBuffer* buf = GST_PAD_PROBE_INFO_BUFFER(info);
-  if (!buf) return GST_PAD_PROBE_OK;
-  guint n = gst_buffer_n_memory(buf);
-  fprintf(stderr, "[gst_video] sink buffer: n_memory=%u size=%" G_GSIZE_FORMAT "\n",
-    n, gst_buffer_get_size(buf));
-  for (guint i = 0; i < n; i++) {
-    GstMemory* m = gst_buffer_peek_memory(buf, i);
-    fprintf(stderr, "[gst_video]   mem[%u] alloc=%s\n", i,
-      (m && m->allocator && m->allocator->mem_type) ? m->allocator->mem_type : "(null)");
-  }
-  GstVideoMeta* vm = gst_buffer_get_video_meta(buf);
-  if (vm)
-    fprintf(stderr, "[gst_video]   videometa n_planes=%u stride0=%d offset1=%" G_GSIZE_FORMAT "\n",
-      vm->n_planes, (int)vm->stride[0], vm->n_planes > 1 ? vm->offset[1] : (gsize)0);
-  else
-    fprintf(stderr, "[gst_video]   videometa: NONE\n");
-  return GST_PAD_PROBE_REMOVE;
-}
-
 static void remove_video_view(Player* p) {
   if (p->view) {
     livi_remove_view(p->view);
@@ -232,8 +178,7 @@ static const char* parser_for(const std::string& c) {
   return "h264parse";
 }
 
-// First decoder in the list whose factory is registered; falls back to the
-// last entry (software) so the pipeline string is still valid.
+// First decoder in the list whose factory is registered, falls back to the last entry (software)
 static const char* pick_decoder(std::initializer_list<const char*> cands) {
   const char* last = "";
   for (const char* c : cands) {
@@ -275,8 +220,7 @@ static const char* sw_decoder_for(const std::string& c) {
 }
 #endif
 
-// Best available decoder per codec, HW-first then software fallback. Adapts at
-// runtime: Pi5 stateless v4l2sl, Pi4 v4l2, x86 VA-API, mac vtdec, win d3d11
+// Best available decoder per codec, HW-first then software fallback
 static const char* decoder_for(const std::string& c) {
   if (getenv("LIVI_GST_SWDEC")) {
     if (c == "h265") return "avdec_h265";
@@ -285,7 +229,6 @@ static const char* decoder_for(const std::string& c) {
     return "avdec_h264";
   }
 #ifdef __APPLE__
-  // if (c == "h265") return pick_decoder({"vtdec", "avdec_h265"});
   // HEVC on macOS uses avdec_h265, not vtdec: vtdec ignores sps_max_num_reorder_pics and adds
   // output latency. Revert to vtdec once the GStreamer bug is fixed.
   // https://gitlab.freedesktop.org/gstreamer/gstreamer/-/work_items/5133
@@ -347,8 +290,7 @@ static napi_value Version(napi_env env, napi_callback_info info) {
   return result;
 }
 
-// probeCodecs() -> { h264: {hw, sw}, h265: {...}, vp9, av1 }
-// hw = a hardware decoder exists, sw = a software decoder exists
+// Returns { codec: {hw, sw} } per codec, hw/sw = a hardware/software decoder exists.
 static napi_value ProbeCodecs(napi_env env, napi_callback_info info) {
   ensure_init();
   napi_value obj;
@@ -377,10 +319,40 @@ static void livi_free_player(Player* p) {
     gst_element_set_state(p->pipeline, GST_STATE_NULL);
     if (p->appsrc) gst_object_unref(p->appsrc);
     if (p->sink) gst_object_unref(p->sink);
+    if (p->glshader) gst_object_unref(p->glshader);
     gst_object_unref(p->pipeline);
   }
   remove_video_view(p);
   delete p;
+}
+
+static const char* CAL_FRAGMENT =
+  "#version 100\n"
+  "precision highp float;\n"
+  "varying vec2 v_texcoord;\n"
+  "uniform sampler2D tex;\n"
+  "uniform float u_gamma;\n"
+  "uniform float u_contrast;\n"
+  "uniform float u_gain_r;\n"
+  "uniform float u_gain_g;\n"
+  "uniform float u_gain_b;\n"
+  "void main() {\n"
+  "  vec3 c = texture2D(tex, v_texcoord).rgb;\n"
+  "  c = pow(c, vec3(1.0 / u_gamma));\n"
+  "  c = (c - 0.5) * u_contrast + 0.5;\n"
+  "  c = c * vec3(u_gain_r, u_gain_g, u_gain_b);\n"
+  "  gl_FragColor = vec4(clamp(c, 0.0, 1.0), 1.0);\n"
+  "}\n";
+
+static void livi_set_gamma_player(Player* p, double gamma, double contrast, double gain_r,
+                                  double gain_g, double gain_b) {
+  if (!p || !p->glshader) return;
+  GstStructure* u = gst_structure_new(
+    "uniforms", "u_gamma", G_TYPE_FLOAT, (float)(gamma > 0.0 ? gamma : 1.0), "u_contrast",
+    G_TYPE_FLOAT, (float)contrast, "u_gain_r", G_TYPE_FLOAT, (float)gain_r, "u_gain_g",
+    G_TYPE_FLOAT, (float)gain_g, "u_gain_b", G_TYPE_FLOAT, (float)gain_b, NULL);
+  g_object_set(p->glshader, "uniforms", u, NULL);
+  gst_structure_free(u);
 }
 
 #ifndef LIVI_GST_HOST_STANDALONE
@@ -391,13 +363,11 @@ static void player_finalize(napi_env env, void* data, void* hint) {
 }
 #endif
 
-// createPlayer(codec: string, windowHandle: Buffer) -> external
 // Build the decode + waylandsink pipeline for a codec. handle is the native window for the
 // mac/Windows overlay, unused on Linux. Returns NULL on parse failure.
 static Player* livi_create_player(const std::string& codec, guintptr handle) {
-  // Two queues on purpose: before the decoder non-leaky (a stateless HW decoder needs every
-  // frame for its reference chain), after the decoder leaky=downstream (drop decoded frames to
-  // stay current if the sink falls behind, without breaking the reference chain).
+  // Two queues: before the decoder non-leaky (a stateless HW decoder needs every
+  // frame for its reference chain), after the decoder leaky=downstream.
   const char* decoder = decoder_for(codec);
 
   std::string presink;
@@ -405,19 +375,35 @@ static Player* livi_create_player(const std::string& codec, guintptr handle) {
   if (!is_hw_decoder(decoder)) presink = "videoconvert ! ";
 #endif
 
-  std::string desc = "appsrc name=src is-live=true do-timestamp=true format=time"
-    " min-latency=0 max-latency=0 caps=" +
-    caps_for(codec) + " ! " + parser_for(codec) +
-    " ! queue max-size-buffers=0 max-size-bytes=0 max-size-time=2000000000" +
-    " ! " + std::string(decoder) + " name=dec" +
-    " ! queue max-size-buffers=2 max-size-bytes=0 max-size-time=0 leaky=downstream" +
-    " ! " + presink + sink_chain();
+  std::string cal;
+#if defined(__APPLE__)
+  cal = "glupload ! glcolorconvert ! glshader name=cal ! ";
+#endif
 
+  auto make_desc = [&](const std::string& calc) -> std::string {
+    return "appsrc name=src is-live=true do-timestamp=true format=time"
+      " min-latency=0 max-latency=0 caps=" +
+      caps_for(codec) + " ! " + parser_for(codec) +
+      " ! queue max-size-buffers=0 max-size-bytes=0 max-size-time=2000000000" +
+      " ! " + std::string(decoder) + " name=dec" +
+      " ! queue max-size-buffers=2 max-size-bytes=0 max-size-time=0 leaky=downstream" +
+      " ! " + presink + calc + sink_chain();
+  };
+
+  std::string desc = make_desc(cal);
   fprintf(stderr, "[gst_video] codec=%s decoder=%s | %s\n",
     codec.c_str(), decoder, desc.c_str());
 
   GError* err = nullptr;
   GstElement* pipeline = gst_parse_launch(desc.c_str(), &err);
+  if ((!pipeline || err) && !cal.empty()) {
+    fprintf(stderr, "[gst_video] calibration pass failed (%s), retrying without it\n",
+      err ? err->message : "unknown");
+    if (err) { g_error_free(err); err = nullptr; }
+    if (pipeline) { gst_object_unref(pipeline); pipeline = nullptr; }
+    desc = make_desc("");
+    pipeline = gst_parse_launch(desc.c_str(), &err);
+  }
   if (!pipeline || err) {
     fprintf(stderr, "[gst_video] pipeline parse FAILED: %s\n",
       err ? err->message : "unknown");
@@ -430,23 +416,16 @@ static Player* livi_create_player(const std::string& codec, guintptr handle) {
   p->pipeline = pipeline;
   p->appsrc = gst_bin_get_by_name(GST_BIN(pipeline), "src");
   p->sink = gst_bin_get_by_name(GST_BIN(pipeline), "sink");
+  p->glshader = gst_bin_get_by_name(GST_BIN(pipeline), "cal");
+  if (p->glshader) {
+    g_object_set(p->glshader, "fragment", CAL_FRAGMENT, NULL);
+    livi_set_gamma_player(p, 1.0, 1.0, 1.0, 1.0, 1.0);
+  }
 
   force_sinks_realtime(pipeline);
 
   GstElement* dec = gst_bin_get_by_name(GST_BIN(pipeline), "dec");
   if (dec) {
-    GstPad* sp = gst_element_get_static_pad(dec, "src");
-    if (sp) {
-      gst_pad_add_probe(sp, GST_PAD_PROBE_TYPE_EVENT_DOWNSTREAM, caps_probe, NULL, NULL);
-      // The alloc-meta probe sits on the decoder's peer pad (the post-decoder queue), because
-      // the decoder queries that peer in decide_allocation and the queue doesn't forward it.
-      GstPad* peer = gst_pad_get_peer(sp);
-      if (peer) {
-        gst_pad_add_probe(peer, GST_PAD_PROBE_TYPE_QUERY_DOWNSTREAM, alloc_meta_probe, NULL, NULL);
-        gst_object_unref(peer);
-      }
-      gst_object_unref(sp);
-    }
     GstPad* dsp = gst_element_get_static_pad(dec, "sink");
     if (dsp) {
       // Only the Pi 4 stateful v4l2 decoders reject 1:4:5:1, the Pi 5 stateless ones accept it.
@@ -461,21 +440,10 @@ static Player* livi_create_player(const std::string& codec, guintptr handle) {
     gst_object_unref(dec);
   }
 
-  if (p->sink) {
-    GstPad* sp = gst_element_get_static_pad(p->sink, "sink");
-    if (sp) {
-      // DIAGNOSTIC (temporary): inspect the first buffer the sink receives.
-      gst_pad_add_probe(sp, GST_PAD_PROBE_TYPE_BUFFER, buffer_probe, NULL, NULL);
-      gst_object_unref(sp);
-    }
-  }
-
   GstBus* bus = gst_element_get_bus(pipeline);
   gst_bus_set_sync_handler(bus, bus_sync, NULL, NULL);
   gst_object_unref(bus);
 
-  // mac/Windows embed the sink into the window surface. Linux uses waylandsink as its own
-  // compositor client, no handle embedding.
 #ifndef __linux__
   guintptr overlay = handle ? livi_attach_view(handle, &p->view) : handle;
   if (p->sink && GST_IS_VIDEO_OVERLAY(p->sink) && overlay) {
@@ -489,7 +457,6 @@ static Player* livi_create_player(const std::string& codec, guintptr handle) {
 }
 
 #ifndef LIVI_GST_HOST_STANDALONE
-// createPlayer(codec: string, windowHandle: Buffer) -> external
 static napi_value CreatePlayer(napi_env env, napi_callback_info info) {
   ensure_init();
 
@@ -544,7 +511,6 @@ static void livi_push_player(Player* p, const void* data, size_t len) {
 }
 
 #ifndef LIVI_GST_HOST_STANDALONE
-// pushBuffer(player, buffer)
 static napi_value PushBuffer(napi_env env, napi_callback_info info) {
   size_t argc = 2;
   napi_value argv[2];
@@ -562,7 +528,7 @@ static napi_value PushBuffer(napi_env env, napi_callback_info info) {
   return result;
 }
 
-// setVisible(player, bool): show/hide the video view (UI navigation in/out)
+// Show/hide the video view (UI navigation in/out)
 static napi_value SetVisible(napi_env env, napi_callback_info info) {
   size_t argc = 2;
   napi_value argv[2];
@@ -606,8 +572,7 @@ static napi_value SetContentRegion(napi_env env, napi_callback_info info) {
   return undef;
 }
 
-// setBackdrop(windowHandle, r, g, b): paint the window content view so the theme colour shows
-// where the UI is transparent and no video covers. r/g/b in 0..1.
+// Paint the window content view with the theme colour where the UI is transparent and no video covers.
 static napi_value SetBackdrop(napi_env env, napi_callback_info info) {
   size_t argc = 4;
   napi_value argv[4];
@@ -627,6 +592,22 @@ static napi_value SetBackdrop(napi_env env, napi_callback_info info) {
     return v;
   };
   if (handle) livi_set_backdrop(handle, d(1), d(2), d(3));
+  napi_value undef;
+  napi_get_undefined(env, &undef);
+  return undef;
+}
+
+static napi_value SetGamma(napi_env env, napi_callback_info info) {
+  size_t argc = 6;
+  napi_value argv[6];
+  napi_get_cb_info(env, info, &argc, argv, NULL, NULL);
+  Player* p = argc >= 1 ? unwrap(env, argv[0]) : nullptr;
+  auto d = [&](size_t idx) -> double {
+    double v = 1.0;
+    if (argc > idx) napi_get_value_double(env, argv[idx], &v);
+    return v;
+  };
+  if (p) livi_set_gamma_player(p, d(1), d(2), d(3), d(4), d(5));
   napi_value undef;
   napi_get_undefined(env, &undef);
   return undef;
@@ -666,6 +647,13 @@ static void livi_host_dispatch(LiviHost* h, guint8 op, guint32 id, const guint8*
       g_hash_table_remove(h->players, key);
       livi_free_player(p);
     }
+  } else if (op == 4) {
+    Player* p = (Player*)g_hash_table_lookup(h->players, key);
+    if (p && rlen >= 5 * sizeof(double)) {
+      double v[5];
+      memcpy(v, rest, sizeof(v));
+      livi_set_gamma_player(p, v[0], v[1], v[2], v[3], v[4]);
+    }
   }
 }
 
@@ -694,8 +682,6 @@ static gboolean livi_host_readable(gint fd, GIOCondition cond, gpointer data) {
 // Where to drop the crash backtrace (next to the AppImage); set in Run() before the handler arms.
 static char g_crash_log_path[1024] = {0};
 
-// On a fatal signal, write a resolved backtrace to stderr and to the crash log, then re-raise.
-// Only async-signal-safe calls here (open/write/backtrace_symbols_fd).
 static void livi_host_crash(int sig) {
   void* frames[64];
   int n = backtrace(frames, 64);
@@ -740,12 +726,10 @@ static void livi_host_main(const char* sockPath, const char* crashLogPath) {
   h->players = g_hash_table_new(g_direct_hash, g_direct_equal);
   g_unix_fd_add(fd, (GIOCondition)(G_IO_IN | G_IO_HUP | G_IO_ERR), livi_host_readable, h);
 
-  fprintf(stderr, "[gst-host] ready, running main loop\n");
   g_main_loop_run(g_main_loop_new(NULL, FALSE));
 }
 
 #ifdef LIVI_GST_HOST_STANDALONE
-// Standalone gst-host: argv[1]=socket path, argv[2]=crash log path.
 int main(int argc, char** argv) {
   const char* sock = argc > 1 ? argv[1] : "";
   const char* crash = argc > 2 ? argv[2] : "";
@@ -753,7 +737,6 @@ int main(int argc, char** argv) {
   return 0;
 }
 #else
-// run(socketPath, crashLogPath): napi entry, forwards to livi_host_main.
 static napi_value Run(napi_env env, napi_callback_info info) {
   size_t argc = 2;
   napi_value argv[2];
@@ -787,6 +770,8 @@ static napi_value Init(napi_env env, napi_value exports) {
   napi_set_named_property(env, exports, "setContentRegion", fn);
   napi_create_function(env, "setBackdrop", NAPI_AUTO_LENGTH, SetBackdrop, NULL, &fn);
   napi_set_named_property(env, exports, "setBackdrop", fn);
+  napi_create_function(env, "setGamma", NAPI_AUTO_LENGTH, SetGamma, NULL, &fn);
+  napi_set_named_property(env, exports, "setGamma", fn);
   napi_create_function(env, "stop", NAPI_AUTO_LENGTH, Stop, NULL, &fn);
   napi_set_named_property(env, exports, "stop", fn);
 #ifdef __linux__

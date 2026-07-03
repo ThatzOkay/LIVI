@@ -77,6 +77,7 @@ export function SettingsPage() {
             onChange={(v) => handleFieldChange(node.path, v)}
             savedLabel={savedLabel}
             onLabelChange={onLabelChange}
+            onDone={() => navigate(-1)}
           />
         </Box>
       </SettingsLayout>

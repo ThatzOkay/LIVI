@@ -1,8 +1,8 @@
 import { useCallback } from 'react'
 
-export const usePaginationDots = (isNavbarHidden: boolean) => {
+export const usePaginationDots = (isNavbarHidden: boolean, isNavPresent = true) => {
   return {
-    showDots: !isNavbarHidden,
+    showDots: isNavPresent ? !isNavbarHidden : true,
     revealDots: useCallback(() => {}, [])
   }
 }

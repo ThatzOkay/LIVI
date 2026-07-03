@@ -8,6 +8,8 @@ type Deps = Pick<
   ProjectionIpcHost,
   | 'getConfig'
   | 'setClusterRequested'
+  | 'isMainClusterWindow'
+  | 'isClusterRequested'
   | 'setClusterVisible'
   | 'resetLastClusterVideoSize'
   | 'getLastClusterCodec'
@@ -17,13 +19,13 @@ type Deps = Pick<
 >
 
 export function registerClusterIpc(host: Deps): void {
-  registerIpcHandle('cluster:request', async (_evt, enabled: boolean) => {
-    const allowed = Boolean(enabled) && isClusterDisplayed(host.getConfig())
-    host.setClusterRequested(allowed)
-    host.setClusterVisible(allowed)
+  registerIpcHandle('cluster:request', async (evt, enabled: boolean) => {
+    const wanted = Boolean(enabled) && isClusterDisplayed(host.getConfig())
+    host.setClusterRequested(evt.sender.id, wanted)
+    if (host.isMainClusterWindow(evt.sender.id)) host.setClusterVisible(wanted)
 
-    if (!allowed) {
-      host.resetLastClusterVideoSize()
+    if (!wanted) {
+      if (!host.isClusterRequested()) host.resetLastClusterVideoSize()
       return { ok: true, enabled: false }
     }
 

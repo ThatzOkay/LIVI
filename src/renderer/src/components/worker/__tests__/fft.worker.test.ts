@@ -158,8 +158,8 @@ describe('fft.worker', () => {
       }
     } as MessageEvent)
 
-    expect(realTransformMock).toHaveBeenCalledTimes(2)
-    expect(postedMessages).toHaveLength(2)
+    expect(realTransformMock).toHaveBeenCalledTimes(5)
+    expect(postedMessages).toHaveLength(5)
   })
 
   test('keeps leftover samples in ring buffer across pcm messages', async () => {

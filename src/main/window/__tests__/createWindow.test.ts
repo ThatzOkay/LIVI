@@ -21,7 +21,6 @@ vi.mock('electron', async () => {
         session: {
           setPermissionCheckHandler: vi.fn(),
           setPermissionRequestHandler: vi.fn(),
-          setDevicePermissionHandler: vi.fn(),
           setUSBProtectedClassesHandler: vi.fn()
         },
         setWindowOpenHandler: vi.fn(),

@@ -34,10 +34,8 @@ import {
   RPM_REDLINE,
   RPM_SCALE_MAX,
   SPEED_LABELS,
-  SPEED_SCALE_MAX,
-  VIGNETTE
+  SPEED_SCALE_MAX
 } from '../constants'
-import { SoftPanel } from './SoftPanel'
 
 const clamp = (v: number, lo: number, hi: number): number => Math.max(lo, Math.min(hi, v))
 
@@ -107,6 +105,9 @@ export function DashFrame({ children, clusterFull }: DashFrameProps) {
   }, [])
 
   const clusterBg = theme.palette.background.default
+  const isDark = theme.palette.mode === 'dark'
+  const calShadowColor = isDark ? 'rgba(0, 0, 0, 0.55)' : 'rgba(255, 255, 255, 0.72)'
+  const calRectColor = isDark ? 'rgba(0, 0, 0, 0.6)' : 'rgba(255, 255, 255, 0.78)'
 
   return (
     <DashShell>
@@ -143,7 +144,6 @@ export function DashFrame({ children, clusterFull }: DashFrameProps) {
               transform: `translateX(${-sidePush}px)`
             }}
           >
-            {clusterFull && <SoftPanel {...VIGNETTE.ring} />}
             <Box sx={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
               <GaugeArc
                 value={speedKph}
@@ -158,6 +158,8 @@ export function DashFrame({ children, clusterFull }: DashFrameProps) {
                 colorMajor={theme.palette.text.secondary}
                 colorPointer={theme.palette.text.primary}
                 colorRedline={theme.palette.error.main}
+                shadow={clusterFull}
+                shadowColor={calShadowColor}
               />
             </Box>
             <Box
@@ -175,6 +177,7 @@ export function DashFrame({ children, clusterFull }: DashFrameProps) {
                 label="KPH"
                 align="end"
                 maxChars={3}
+                backdropColor={clusterFull ? calRectColor : undefined}
               />
             </Box>
           </Box>
@@ -190,7 +193,6 @@ export function DashFrame({ children, clusterFull }: DashFrameProps) {
               transform: `translateX(${sidePush}px)`
             }}
           >
-            {clusterFull && <SoftPanel {...VIGNETTE.ring} />}
             <Box sx={{ position: 'absolute', inset: 0, pointerEvents: 'none' }}>
               <GaugeArc
                 value={rpm}
@@ -207,6 +209,8 @@ export function DashFrame({ children, clusterFull }: DashFrameProps) {
                 colorMajor={theme.palette.text.secondary}
                 colorPointer={theme.palette.text.primary}
                 colorRedline={theme.palette.error.main}
+                shadow={clusterFull}
+                shadowColor={calShadowColor}
               />
             </Box>
             <Box
@@ -219,7 +223,13 @@ export function DashFrame({ children, clusterFull }: DashFrameProps) {
                 transform: `translate(calc(-50% - ${READOUT_DX}px), -50%)`
               }}
             >
-              <SoftReadout value={normalizeGear(gear)} label="GEAR" align="start" maxChars={3} />
+              <SoftReadout
+                value={normalizeGear(gear)}
+                label="GEAR"
+                align="start"
+                maxChars={3}
+                backdropColor={clusterFull ? calRectColor : undefined}
+              />
             </Box>
           </Box>
 

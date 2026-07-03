@@ -74,7 +74,6 @@ function mapCarTypeToFuelTypes(carType: CarType | undefined): number[] {
 
 export interface AaDriverOptions {
   onWillReenumerate?: (durationMs: number) => void
-  rendererAoapHandshake?: (vendorId: number, productId: number) => Promise<void>
 }
 
 export class AaDriver extends EventEmitter implements IPhoneDriver {
@@ -100,14 +99,10 @@ export class AaDriver extends EventEmitter implements IPhoneDriver {
   private _wiredBridge: UsbAoapBridge | null = null
   private _wiredClientSocket: net.Socket | null = null
   private readonly _onWillReenumerate: ((durationMs: number) => void) | undefined
-  private readonly _rendererAoapHandshake:
-    | ((vendorId: number, productId: number) => Promise<void>)
-    | undefined
 
   constructor(opts: AaDriverOptions = {}) {
     super()
     this._onWillReenumerate = opts.onWillReenumerate
-    this._rendererAoapHandshake = opts.rendererAoapHandshake
   }
 
   setHevcSupported(supported: boolean): void {
@@ -331,7 +326,7 @@ export class AaDriver extends EventEmitter implements IPhoneDriver {
     const device = this._wiredDevice
     if (!device) return false
 
-    const bridge = new UsbAoapBridge(device, this._onWillReenumerate, this._rendererAoapHandshake)
+    const bridge = new UsbAoapBridge(device, this._onWillReenumerate)
     this._wiredBridge = bridge
 
     bridge.on('error', (err: Error) => {
@@ -584,17 +579,16 @@ export class AaDriver extends EventEmitter implements IPhoneDriver {
         return true
       }
 
-      // TODO: replace with KEYCODE_TURN_CARD (65544) or PRIMARY/SECONDARY
-      if (cmd === CommandMapping.up) {
-        if (DEBUG) console.log(`[INPUT] up → DPAD_LEFT (interim tile-cycle)`)
-        this._aa.sendButton(BUTTON_KEY.DPAD_LEFT, true)
-        this._aa.sendButton(BUTTON_KEY.DPAD_LEFT, false)
-        return true
+      // D-pad up/down: move focus vertically through the elements.
+      const dpadKey: Partial<Record<number, number>> = {
+        [CommandMapping.up]: BUTTON_KEY.DPAD_UP,
+        [CommandMapping.down]: BUTTON_KEY.DPAD_DOWN
       }
-      if (cmd === CommandMapping.down) {
-        if (DEBUG) console.log(`[INPUT] down → DPAD_RIGHT (interim tile-cycle)`)
-        this._aa.sendButton(BUTTON_KEY.DPAD_RIGHT, true)
-        this._aa.sendButton(BUTTON_KEY.DPAD_RIGHT, false)
+      const dpad = dpadKey[cmd]
+      if (dpad !== undefined) {
+        if (DEBUG) console.log(`[INPUT] → dpad keycode ${dpad} press+release`)
+        this._aa.sendButton(dpad, true)
+        this._aa.sendButton(dpad, false)
         return true
       }
 

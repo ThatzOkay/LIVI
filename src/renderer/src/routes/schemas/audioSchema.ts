@@ -54,9 +54,7 @@ export const audioSchema: SettingsNode<Config> = {
       valueTransform: audioValueTransform,
       page: {
         title: 'Music',
-        labelTitle: 'settings.music',
-        description: 'Music volume',
-        labelDescription: 'settings.musicDescription'
+        labelTitle: 'settings.music'
       }
     },
     {
@@ -69,9 +67,7 @@ export const audioSchema: SettingsNode<Config> = {
       valueTransform: audioValueTransform,
       page: {
         title: 'Navigation',
-        labelTitle: 'settings.navigation',
-        description: 'Navigation volume',
-        labelDescription: 'settings.navigationDescription'
+        labelTitle: 'settings.navigation'
       }
     },
     {
@@ -84,9 +80,7 @@ export const audioSchema: SettingsNode<Config> = {
       valueTransform: audioValueTransform,
       page: {
         title: 'Voice Assistant',
-        labelTitle: 'settings.voiceAssistant',
-        description: 'Voice assistant volume',
-        labelDescription: 'settings.voiceAssistantDescription'
+        labelTitle: 'settings.voiceAssistant'
       }
     },
     {
@@ -99,9 +93,7 @@ export const audioSchema: SettingsNode<Config> = {
       valueTransform: audioValueTransform,
       page: {
         title: 'Phone Calls',
-        labelTitle: 'settings.phoneCalls',
-        description: 'Phone call volume',
-        labelDescription: 'settings.phoneCallsDescription'
+        labelTitle: 'settings.phoneCalls'
       }
     },
     {
@@ -114,9 +106,7 @@ export const audioSchema: SettingsNode<Config> = {
       valueTransform: audioValueTransform,
       page: {
         title: 'System Sounds',
-        labelTitle: 'settings.systemSounds',
-        description: 'Volume of LIVI system sounds (e.g. the turn-signal relay click).',
-        labelDescription: 'settings.systemSoundsDescription'
+        labelTitle: 'settings.systemSounds'
       }
     },
     {
@@ -130,9 +120,7 @@ export const audioSchema: SettingsNode<Config> = {
       loadOptions: loadAudioOutputDevices,
       page: {
         title: 'Audio Output',
-        labelTitle: 'settings.audioOutputDevice',
-        description: 'Pick the audio sink.',
-        labelDescription: 'settings.audioOutputDeviceDescription'
+        labelTitle: 'settings.audioOutputDevice'
       }
     },
     {
@@ -146,9 +134,7 @@ export const audioSchema: SettingsNode<Config> = {
       loadOptions: loadAudioInputDevices,
       page: {
         title: 'Audio Input',
-        labelTitle: 'settings.audioInputDevice',
-        description: 'Pick the microphone source.',
-        labelDescription: 'settings.audioInputDeviceDescription'
+        labelTitle: 'settings.audioInputDevice'
       }
     },
     {
@@ -163,9 +149,7 @@ export const audioSchema: SettingsNode<Config> = {
       ],
       page: {
         title: 'Sampling Frequency',
-        labelTitle: 'settings.samplingFrequency',
-        description: 'Phone main-audio stream sampling frequency.',
-        labelDescription: 'settings.samplingFrequencyDescription'
+        labelTitle: 'settings.samplingFrequency'
       }
     },
     // Currently disabled

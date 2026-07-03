@@ -371,16 +371,16 @@ describe('AaDriver.send — SendCommand', () => {
     expect(aa.sendButton).toHaveBeenCalledWith(keycode, false)
   })
 
-  test('up → DPAD_LEFT press+release', async () => {
+  test('up → DPAD_UP press+release', async () => {
     await d.send(new SendCommand('up'))
-    expect(aa.sendButton).toHaveBeenCalledWith(21, true)
-    expect(aa.sendButton).toHaveBeenCalledWith(21, false)
+    expect(aa.sendButton).toHaveBeenCalledWith(19, true)
+    expect(aa.sendButton).toHaveBeenCalledWith(19, false)
   })
 
-  test('down → DPAD_RIGHT press+release', async () => {
+  test('down → DPAD_DOWN press+release', async () => {
     await d.send(new SendCommand('down'))
-    expect(aa.sendButton).toHaveBeenCalledWith(22, true)
-    expect(aa.sendButton).toHaveBeenCalledWith(22, false)
+    expect(aa.sendButton).toHaveBeenCalledWith(20, true)
+    expect(aa.sendButton).toHaveBeenCalledWith(20, false)
   })
 
   test('releaseVideoFocus returns true without further action', async () => {

@@ -28,16 +28,6 @@ vi.mock('@mui/material', async () => {
         onChange={(e) => onChange(e, Number(e.currentTarget.value))}
       />
     ),
-    Select: ({ value, onChange, children }: any) => (
-      <select
-        data-testid="select"
-        value={value}
-        onChange={(e) => onChange({ target: { value: e.currentTarget.value } })}
-      >
-        {children}
-      </select>
-    ),
-    MenuItem: ({ value, children }: any) => <option value={value}>{children}</option>,
     IconButton: ({ onClick, disabled, children }: any) => (
       <button data-testid="icon-button" disabled={disabled} onClick={onClick}>
         {children}
@@ -128,7 +118,7 @@ describe('SettingsFieldControl', () => {
       />
     )
     expect(screen.getByText('t:settings.auto')).toBeInTheDocument()
-    fireEvent.change(screen.getByTestId('select'), { target: { value: 'auto' } })
+    fireEvent.click(screen.getByText('t:settings.auto'))
     expect(onChange).toHaveBeenCalledWith('auto')
   })
 
